@@ -1,0 +1,6 @@
+lp: linf
+fd_eta: 0.01
+step_size: 0.25
+prior_step_size: 0.1
+exp_step_size: 0.1
+prior_size: 50

@@ -75,7 +75,24 @@ def meta_pseudo_gaussian_pert(s):
     return delta
 
 
-def square_attack_l2(model, x, y, corr_classified, eps, n_iters, p_init, metrics_path, targeted, loss_type, log):
+def get_margin(model, x, y, logits, targeted, stop_criterion):
+    if stop_criterion == 'single':
+        margin_min = model.loss(y, logits, targeted, loss_type='margin_loss')
+    elif stop_criterion == 'without_defense':
+    ## base model
+        base_logits = model.predict(x, defense=False)
+        margin_min = model.loss(y, base_logits, targeted, loss_type='margin_loss')
+    elif stop_criterion == 'fast_exp':
+    ## fast expectation
+        margin_min = model.loss(y, logits, targeted, loss_type='margin_loss')
+        if sum(margin_min <= 0) > 0:
+            margin_min[margin_min <= 0] = get_remaining_idx(model, x[margin_min <= 0], y[margin_min <= 0])
+    elif stop_criterion == 'exp':
+    ## true expectation
+        margin_min = get_remaining_idx(model, x, y)
+    return margin_min
+
+def square_attack_l2(model, x, y, corr_classified, eps, n_iters, p_init, metrics_path, targeted, loss_type, log, stop_criterion):
     """ The L2 square attack """
     np.random.seed(0)
 
@@ -102,9 +119,10 @@ def square_attack_l2(model, x, y, corr_classified, eps, n_iters, p_init, metrics
     x_best = np.clip(x + delta_init / np.sqrt(np.sum(delta_init ** 2, axis=(1, 2, 3), keepdims=True)) * eps, 0, 1)
 
     logits = model.predict(x_best)
-    base_logits = model.predict(x_best, defense=False)
+    # base_logits = model.predict(x_best, defense=False)
     loss_min = model.loss(y, logits, targeted, loss_type=loss_type)
-    margin_min = model.loss(y, base_logits, targeted, loss_type='margin_loss')
+    # margin_min = model.loss(y, base_logits, targeted, loss_type='margin_loss')
+    margin_min = get_margin(model, x_best, y, logits, targeted, stop_criterion)
     n_queries = np.ones(x.shape[0])  # ones because we have already used 1 query
 
     time_start = time.time()
@@ -164,9 +182,10 @@ def square_attack_l2(model, x, y, corr_classified, eps, n_iters, p_init, metrics
         curr_norms_image = np.sqrt(np.sum((x_new - x_curr) ** 2, axis=(1, 2, 3), keepdims=True))
 
         logits = model.predict(x_new)
-        base_logits = model.predict(x_new, defense=False)
+        # base_logits = model.predict(x_new, defense=False)
         loss = model.loss(y_curr, logits, targeted, loss_type=loss_type)
-        margin = model.loss(y_curr, base_logits, targeted, loss_type='margin_loss')
+        # margin = model.loss(y_curr, base_logits, targeted, loss_type='margin_loss')
+        margin = get_margin(model, x_new, y_curr, logits, targeted, stop_criterion)
 
         idx_improved = loss < loss_min_curr
         loss_min[idx_to_fool] = idx_improved * loss + ~idx_improved * loss_min_curr
@@ -200,7 +219,7 @@ def square_attack_l2(model, x, y, corr_classified, eps, n_iters, p_init, metrics
     return n_queries, x_best
 
 
-def square_attack_linf(model, x, y, corr_classified, eps, n_iters, p_init, metrics_path, targeted, loss_type, log):
+def square_attack_linf(model, x, y, corr_classified, eps, n_iters, p_init, metrics_path, targeted, loss_type, log, stop_criterion):
     """ The Linf square attack """
     np.random.seed(0)  # important to leave it here as well
     min_val, max_val = 0, 1 if x.max() <= 1 else 255
@@ -216,9 +235,9 @@ def square_attack_linf(model, x, y, corr_classified, eps, n_iters, p_init, metri
 
     logits = model.predict(x_best)
     loss_min = model.loss(y, logits, targeted, loss_type=loss_type)
-    # base_logits = model.predict(x_best, defense=False)
-    # margin_min = model.loss(y, base_logits, targeted, loss_type='margin_loss')
-    margin_min = get_remaining_idx(model, x_best, y)
+    
+    margin_min = get_margin(model, x_best, y, logits, targeted, stop_criterion)
+    
     n_queries = np.ones(x.shape[0])  # ones because we have already used 1 query
 
     time_start = time.time()
@@ -247,9 +266,17 @@ def square_attack_linf(model, x, y, corr_classified, eps, n_iters, p_init, metri
 
         logits = model.predict(x_new)
         loss = model.loss(y_curr, logits, targeted, loss_type=loss_type)
+        ## base model
         # base_logits = model.predict(x_new, defense=False)
         # margin = model.loss(y_curr, base_logits, targeted, loss_type='margin_loss')
-        margin = get_remaining_idx(model, x_new, y_curr)
+        ## fast expectation
+        # margin = model.loss(y_curr, logits, targeted, loss_type='margin_loss')
+        # if sum(margin_min <= 0) > 0:
+        #     margin[margin <= 0] = get_remaining_idx(model, x_new[margin <= 0], y_curr[margin <= 0])
+        ## true expectation
+        # margin = get_remaining_idx(model, x_new, y_curr)
+
+        margin = get_margin(model, x_new, y_curr, logits, targeted, stop_criterion)
 
         idx_improved = loss < loss_min_curr
         loss_min[idx_to_fool] = idx_improved * loss + ~idx_improved * loss_min_curr

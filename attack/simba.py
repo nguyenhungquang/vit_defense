@@ -22,7 +22,7 @@ class SimBA(BaseAttack):
         return z
 
 
-    def attack(self, img, labels, max_iters, targeted=False):
+    def attack(self, img, labels, max_iters, stop_criterion, targeted=False):
         bsz = img.shape[0]
         image_size = img.shape[2]
         if self.order == 'rand':
@@ -46,35 +46,39 @@ class SimBA(BaseAttack):
         l2 = torch.zeros(bsz, max_iters)
         linf = torch.zeros(bsz, max_iters)
         prev_prob = self.get_prob(img, labels)
-        pred = self.get_pred(img)
+        # pred = self.get_pred(img, stop_criterion, labels)
         if self.pixel_attack:
             trans = lambda z: z
         else:
             trans = lambda z: block_idct(z, block_size=image_size, linf_bound=self.linf_bound)
 
+        remaining = torch.ones(bsz).bool()
         remaining_indices = torch.arange(0, bsz).long()
         for k in range(max_iters):
             dim = indices[k]
             expanded_pert = trans(self.expand_vector(pert, expand_dims))
+            remaining_labels = labels[remaining_indices]
             perturbed_img = (img[remaining_indices] + expanded_pert[remaining_indices]).clamp(0, 1)
             l2[:, k] = expanded_pert.view(bsz, -1).norm(2, 1)
             linf[:, k] = expanded_pert.view(bsz, -1).abs().max(1)[0]
-            pred_next = self.get_pred(perturbed_img)
-            pred[remaining_indices] = pred_next
+            # pred_next = self.get_pred(perturbed_img, stop_criterion, remaining_labels)
+            # pred[remaining_indices] = pred_next
             if targeted:
-                remaining = pred.ne(labels)
+                # remaining = pred.ne(labels)
+                remaining[remaining_indices] = ~self.get_remaining(perturbed_img, stop_criterion, remaining_labels)
             else:
-                remaining = pred.eq(labels)
+                # remaining = pred.eq(labels)
+                remaining[remaining_indices] = self.get_remaining(perturbed_img, stop_criterion, remaining_labels)
             if remaining.sum() == 0:
                 adv = (img + expanded_pert).clamp(0, 1)
                 probs_k = self.get_prob(adv, labels)
                 prob[:, k:] = probs_k.unsqueeze(1).repeat(1, max_iters - k)
-                succ[:, k:] = torch.ones(bsz, max_iters - k)
+                # succ[:, k:] = torch.ones(bsz, max_iters - k)
                 queries[:, k:] = torch.zeros(bsz, max_iters - k)
                 break
             remaining_indices = torch.nonzero(remaining).squeeze(1)
-            if k > 0:
-                succ[:, k-1] = ~remaining
+            # if k > 0:
+            #     succ[:, k-1] = ~remaining
             diff = torch.zeros(remaining.sum(), n_dims)
             diff[:, dim] = self.eps
             left_vec = pert[remaining_indices] + diff
@@ -115,13 +119,15 @@ class SimBA(BaseAttack):
             prev_prob = prob[:, k]
 
             self.log.print('Iteration %d: queries = %.4f, prob = %.4f, remaining = %.4f, l2 = %.2f, linf = %.2f' % (
-                        k + 1, queries.sum(1).mean(), prob[:, k].mean(), remaining.float().mean(), l2[:, k].mean(), linf[:, k].mean()))
+                        k + 1, queries.sum(1).mean(), prob[:, k].mean(), remaining.float().sum() / 1000, l2[:, k].mean(), linf[:, k].mean()))
 
         perturbed_img = (img + trans(self.expand_vector(pert, expand_dims))).clamp(0, 1) 
-        pred = self.get_pred(perturbed_img)
-        if targeted:
-            remaining = pred.ne(labels)
-        else:
-            remaining = pred.eq(labels)
+        # pred = self.get_pred(perturbed_img, stop_criterion, labels)
+        # if targeted:
+        #     # remaining = pred.ne(labels)
+        #     remaining = ~self.get_remaining(perturbed_img, stop_criterion, remaining_labels)
+        # else:
+        #     # remaining = pred.eq(labels)
+        #     remaining = self.get_remaining(perturbed_img, stop_criterion, remaining_labels)
         succ[:, max_iters-1] = ~remaining
         return perturbed_img, prob, succ, queries, l2, linf

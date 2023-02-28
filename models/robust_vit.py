@@ -162,6 +162,11 @@ class Block(nn.Module):
             elif self.def_position == 'pre_att_all':
                 x = self.defense_token(x)
         x = x + self.drop_path1(self.ls1(self.attn(self.norm1(x))))
+        if self.defense:
+            if self.def_position == 'post_att_cls':
+                x[:, 0] = self.defense_token(x[:, 0])
+            elif self.def_position == 'post_att_all':
+                x = self.defense_token(x)
         x = x + self.drop_path2(self.ls2(self.mlp(self.norm2(x))))
         return x
 
@@ -173,7 +178,7 @@ class Block(nn.Module):
             return gauss_x
         elif self.defense_cls == 'random_noise':
             noise=torch.randn_like(x) * self.noise_sigma
-            return x+noise
+            return x + noise 
         elif self.defense_cls == 'identical':
             return x
 
@@ -385,7 +390,7 @@ class VisionTransformer(nn.Module):
             self.init_weights(weight_init)
 
         # assert defense_cls in ['gauss_filter', 'random_noise', 'identical', 'reverse_atk'], 'Not supported defence'
-        assert def_position in [None, 'baseline', 'input_noise', 'pre_att_cls', 'pre_att_all', 'last_cls', 'logits']
+        # assert def_position in [None, 'baseline', 'input_noise', 'pre_att_cls', 'pre_att_all', 'last_cls', 'logits']
         self.def_position = def_position
         self.defense_cls = defense_cls
         self.noise_sigma = noise_sigma
@@ -499,8 +504,12 @@ class VisionTransformer(nn.Module):
 
     def set_defense(self, defense):
         self.defense = defense
-        for m in self.blocks:
-            m.defense = defense
+        check_index = lambda i: return i == self.layer_index if isinstance(self.layer_index, int) else i in self.layer_index
+        for i, m in enumerate(self.blocks):
+            if check_index(i) or self.layer_index == -1:
+                m.defense = defense
+            else:
+                m.defense = False
 
 def init_weights_vit_timm(module: nn.Module, name: str = ''):
     """ ViT weight initialization, original timm impl (for reproducibility) """

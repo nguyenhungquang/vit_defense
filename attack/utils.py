@@ -37,13 +37,48 @@ def get_remaining_idx(model, x, y):
     # idx = labels == y
     # return idx
     score = 0
-    labels = y.nonzero()[1]
-    n_samples = 5
+    labels = y#.nonzero()[1]
+    n_samples = 9
     for i in range(n_samples):
         pred = model.predict(x).argmax(1)
         score += (pred == labels).astype(float) * 2 - 1
     return score / n_samples
 
+def norm(x):
+    assert len(x.shape) == 4
+    x_norm = torch.linalg.vector_norm(x, dim=[1, 2, 3], keepdim=True)
+    return x_norm
+
+def l2_step(x, g, step_size):
+    return x + step_size * g / norm(g)
+
+def linf_step(x, g, step_size):
+    return x + step_size * g.sign()
+
+def get_l2_proj(x, new_x, eps):
+    # x_clone = x.clone()
+    num_dim = len(x.shape[1:])
+    # def proj(new_x):
+    delta = new_x - x
+    norm_delta = delta.norm(p=2, dim=list(range(1, num_dim+1)), keepdim=True)
+    return x + (norm_delta <= eps).float() * delta + (norm_delta > eps).float() * eps * delta / norm_delta
+    # return proj
+
+def get_linf_proj(x, new_x, eps):
+    return x + torch.clamp(new_x - x, -eps, eps)
+    # return proj
+
+def step(x, g, lr):
+    return x + lr * g
+
+def eg_step(x, g, lr):
+    """
+        exponeniated gradient step
+    """
+    pos = x * torch.exp(lr * g)
+    neg = (1 - x) * torch.exp(lr * g)
+    new_x = pos / (pos + neg)
+    return new_x
 
 # reverses the normalization transformation
 def invert_normalization(imgs, dataset):
