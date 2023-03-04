@@ -1,6 +1,7 @@
 from .base import BaseAttack
 from .utils import *
 
+import numpy as np
 import torch
 
 def get_margin(model, x, y, stop_criterion, targeted=False):
@@ -52,44 +53,45 @@ class NES(BaseAttack):
         self.sigma = sigma
         self.targeted = targeted
         self.step_size = step_size
+        # self.update_fn = 
 
     @torch.no_grad()
     def run_one_iter(self, x, labels, n_queries=None):
         num_dim = len(x.shape[1:])
         total_grad = torch.zeros_like(x)
-
+        n_queries = self.n_queries_each
         for _ in range(n_queries):
-            tangent = torch.randn_like(x)
+            tangent = torch.randn_like(x) #/(np.prod(list(x.shape[1:]))**0.5) 
             forward_x = x + self.sigma * tangent
             backward_x = x - self.sigma * tangent
             forward_y = self.model.predict(forward_x, True)
             backward_y = self.model.predict(backward_x, True)
-            change = (-self.model.loss(labels, forward_y, targeted=self.targeted) + self.model.loss(labels, backward_y, targeted=self.targeted)) / (4 * self.sigma)
-            total_grad += torch.tensor(change, device=tangent.device).reshape(-1, *[1] * num_dim) * tangent
+            change = (self.model.loss(labels, forward_y, targeted=self.targeted) - self.model.loss(labels, backward_y, targeted=self.targeted)) / (2 * self.sigma)
+            total_grad -= torch.tensor(change, device=tangent.device).reshape(-1, *[1] * num_dim) * tangent
 
         new_x = x + self.step_size * total_grad.sign()# / total_grad.norm(p=2, dim=list(range(1, num_dim+1)), keepdim=True)
         return new_x, 2 * n_queries #* torch.ones(x.shape[0])
 
-    def attack(self, x, labels, n_queries, stop_criterion):
-        total_queries = 0
-        n_ex = x.shape[0]
-        n_iter = n_queries // self.n_queries_each 
-        last_n_queries = n_queries % self.n_queries_each 
-        # queries = torch.zeros(n_ex, device=x.device)
-        margin = get_margin(self.model, x, labels, stop_criterion)
-        base_x = x.clone()
-        if self.lp == 'l2':
-            projection = get_l2_proj#(x, self.eps)
-        elif self.lp == 'linf':
-            projection = get_linf_proj#(x, self.eps)
-        for i in range(n_iter + 1):
+#     def attack(self, x, labels, n_queries, stop_criterion):
+#         total_queries = 0
+#         n_ex = x.shape[0]
+#         n_iter = n_queries // self.n_queries_each 
+#         last_n_queries = n_queries % self.n_queries_each 
+#         # queries = torch.zeros(n_ex, device=x.device)
+#         margin = get_margin(self.model, x, labels, stop_criterion)
+#         base_x = x.clone()
+#         if self.lp == 'l2':
+#             projection = get_l2_proj#(x, self.eps)
+#         elif self.lp == 'linf':
+#             projection = get_linf_proj#(x, self.eps)
+#         for i in range(n_iter + 1):
             
-            idx_to_fool = margin > 0
-            x, labels, base_x = x[idx_to_fool], labels[idx_to_fool], base_x[idx_to_fool]
-            x, q = self.run_one_iter(x, labels, self.n_queries_each // 2 if i < n_iter else last_n_queries // 2)
-            total_queries += q
-            x = projection(base_x, x, self.eps)
-            margin = get_margin(self.model, x, labels, stop_criterion)
-            acc = (margin > 0).sum() / n_ex
-            self.log.print(f'Iter: {i}, Query: {total_queries}, Acc: {acc}')
+#             idx_to_fool = margin > 0
+#             x, labels, base_x = x[idx_to_fool], labels[idx_to_fool], base_x[idx_to_fool]
+#             x, q = self.run_one_iter(x, labels, self.n_queries_each // 2 if i < n_iter else last_n_queries // 2)
+#             total_queries += q
+#             x = projection(base_x, x, self.eps)
+#             margin = get_margin(self.model, x, labels, stop_criterion)
+#             acc = (margin > 0).sum() / n_ex
+#             self.log.print(f'Iter: {i}, Query: {total_queries}, Acc: {acc}')
             

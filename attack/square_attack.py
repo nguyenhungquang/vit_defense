@@ -10,6 +10,7 @@ from datetime import datetime
 np.set_printoptions(precision=5, suppress=True)
 import logging
 log = logging.getLogger(__name__)
+import torch
 
 def p_selection(p_init, it, n_iters):
     """ Piece-wise constant schedule for p (the fraction of pixels changed on every iteration). """
@@ -76,7 +77,7 @@ def meta_pseudo_gaussian_pert(s):
 
 
 def get_margin(model, x, y, logits, targeted, stop_criterion):
-    if stop_criterion == 'single':
+    if stop_criterion == 'single' or stop_criterion == 'none':
         margin_min = model.loss(y, logits, targeted, loss_type='margin_loss')
     elif stop_criterion == 'without_defense':
     ## base model
@@ -129,7 +130,10 @@ def square_attack_l2(model, x, y, corr_classified, eps, n_iters, p_init, metrics
     s_init = int(np.sqrt(p_init * n_features / c))
     metrics = np.zeros([n_iters, 7])
     for i_iter in range(n_iters):
-        idx_to_fool = (margin_min > 0.0)
+        if stop_criterion == 'none':
+            idx_to_fool = torch.ones(n_ex_total).bool()
+        else:
+            idx_to_fool = (margin_min > 0.0)
 
         x_curr, x_best_curr = x[idx_to_fool], x_best[idx_to_fool]
         y_curr, margin_min_curr = y[idx_to_fool], margin_min[idx_to_fool]
@@ -243,7 +247,10 @@ def square_attack_linf(model, x, y, corr_classified, eps, n_iters, p_init, metri
     time_start = time.time()
     metrics = np.zeros([n_iters, 7])
     for i_iter in range(n_iters - 1):
-        idx_to_fool = margin_min > 0
+        if stop_criterion == 'none':
+            idx_to_fool = torch.ones(n_ex_total).bool()
+        else:
+            idx_to_fool = (margin_min > 0.0)
         # idx_to_fool = get_remaining_idx(model, x_curr, y_curr)
         x_curr, x_best_curr, y_curr = x[idx_to_fool], x_best[idx_to_fool], y[idx_to_fool]
         loss_min_curr, margin_min_curr = loss_min[idx_to_fool], margin_min[idx_to_fool]
@@ -291,7 +298,7 @@ def square_attack_linf(model, x, y, corr_classified, eps, n_iters, p_init, metri
         avg_margin_min = np.mean(margin_min)
         time_total = time.time() - time_start
         log.print('{}: acc={:.2%} acc_corr={:.2%} avg#q_ae={:.2f} med#q={:.1f}, avg_margin={:.2f} (n_ex={}, eps={:.3f}, {:.2f}s)'.
-            format(i_iter+1, acc, acc_corr, mean_nq_ae, median_nq_ae, avg_margin_min, x.shape[0], eps, time_total))
+            format(i_iter+1, acc, acc_corr, mean_nq_ae, median_nq_ae, avg_margin_min, x_curr.shape[0], eps, time_total))
 
         metrics[i_iter] = [acc, acc_corr, mean_nq, mean_nq_ae, median_nq_ae, margin_min.mean(), time_total]
         if (i_iter <= 500 and i_iter % 20 == 0) or (i_iter > 100 and i_iter % 50 == 0) or i_iter + 1 == n_iters or acc == 0:

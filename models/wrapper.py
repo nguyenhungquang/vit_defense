@@ -8,7 +8,7 @@ class ModelWrapper:
         self.model = model
         self.num_classes = num_classes
         self.model.to(device)
-        self.batch_size = 256
+        self.batch_size = 64
         self.device = device
         # self.mean = np.reshape([0.485, 0.456, 0.406], [1, 3, 1, 1])
         # self.std = np.reshape([0.229, 0.224, 0.225], [1, 3, 1, 1])
@@ -19,16 +19,17 @@ class ModelWrapper:
         self.def_position = def_position
         self.model.eval()
         self.model.set_defense(True)
+        # self.model = torch.jit.trace(self.model, torch.randn(self.batch_size, 3, 224, 224, device=device))
 
     def __call__(self, x):
         if self.def_position == 'input_noise':
-            x = x + np.random.normal(scale=2 / 255, size=x.shape).astype(np.float32)
+            x = x + np.random.normal(scale=self.model.noise_sigma, size=x.shape).astype(np.float32)
         x = x.to(self.device)
         x = (x - self.mean_torch) / self.std_torch
         return self.model(x).cpu()
 
     def predict(self, x, return_tensor=False, defense=True):
-        self.model.set_defense(defense)
+        # self.model.set_defense(defense)
         if self.def_position == 'input_noise' and defense:
             # max_norm = np.random.exponential(scale=1.0, size=None)
             # pert = np.random.uniform(-max_norm, max_norm, size=x.shape)
@@ -59,7 +60,7 @@ class ModelWrapper:
                 if not return_tensor:
                     logits = logits.numpy()
                 logits_list.append(logits)
-        self.model.set_defense(True)
+        # self.model.set_defense(True)
         if return_tensor:
             logits = torch.cat(logits_list)
         else:
@@ -67,7 +68,7 @@ class ModelWrapper:
         return logits
 
     def loss(self, y, logits, targeted=False, loss_type='margin_loss'):
-        y = utils.random_classes_except_current(y, n_cls) if targeted else y
+        y = utils.random_classes_except_current(y, self.num_classes) if targeted else y
         y = utils.dense_to_onehot(y, n_cls=self.num_classes)
         if torch.is_tensor(y):
             y = y.cpu().numpy()

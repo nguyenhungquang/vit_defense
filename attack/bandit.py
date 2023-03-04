@@ -33,7 +33,7 @@ class Bandit(BaseAttack):
             self.prior = torch.zeros(prior_shape)
         else:
             self.prior = self.prior[self.idx_to_fool]
-        exp_noise = torch.randn(prior_shape)
+        exp_noise = torch.randn(prior_shape) #/ (np.prod(list(prior_shape[1:]))**0.5) 
 
         q1 = self.prior + exp_noise * self.exp_step_size
         q2 = self.prior - exp_noise * self.exp_step_size

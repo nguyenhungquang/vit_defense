@@ -114,9 +114,11 @@ class BaseAttack:
         elif self.lp == 'linf':
             projection = get_linf_proj#(x, self.eps)
         for i in range(n_iter + 1):
-            
-            self.idx_to_fool = remaining#pred == labels
-            x, labels, base_x = x[self.idx_to_fool], labels[self.idx_to_fool], base_x[self.idx_to_fool]
+            if stop_criterion == 'none':
+                self.idx_to_fool = torch.ones(n_ex).bool()
+            else:
+                self.idx_to_fool = remaining#pred == labels
+                x, labels, base_x = x[self.idx_to_fool], labels[self.idx_to_fool], base_x[self.idx_to_fool]
             x, q = self.run_one_iter(x, labels)
             total_queries += q
             x = projection(base_x, x, self.eps)

@@ -177,8 +177,11 @@ class Block(nn.Module):
             gauss_x = torch.tensor(gauss_x).cuda()
             return gauss_x
         elif self.defense_cls == 'random_noise':
-            noise=torch.randn_like(x) * self.noise_sigma
+            noise = torch.randn_like(x) * self.noise_sigma
             return x + noise 
+        elif self.defense_cls == 'laplace':
+            d = torch.distributions.laplace.Laplace(torch.zeros_like(x), self.noise_sigma * torch.ones_like(x))
+            return x + d.sample()
         elif self.defense_cls == 'identical':
             return x
 
@@ -377,7 +380,7 @@ class VisionTransformer(nn.Module):
                 act_layer=act_layer,
                 def_position=def_position, 
                 defense_cls=defense_cls,
-                noise_sigma=noise_sigma
+                noise_sigma=noise_sigma if isinstance(noise_sigma, (int, float)) else noise_sigma[i]
             )
             for i in range(depth)])
         self.norm = norm_layer(embed_dim) if not use_fc_norm else nn.Identity()
@@ -490,6 +493,9 @@ class VisionTransformer(nn.Module):
         elif self.defense_cls == 'random_noise':
             noise=torch.randn_like(x) * self.noise_sigma
             return x+noise
+        elif self.defense_cls == 'laplace':
+            d = torch.distributions.laplace.Laplace(torch.zeros_like(x), self.noise_sigma * torch.ones_like(x))
+            return x + d.sample()
         elif self.defense_cls == 'identical':
             return x
         elif self.defense_cls == 'reverse_atk':
@@ -504,7 +510,7 @@ class VisionTransformer(nn.Module):
 
     def set_defense(self, defense):
         self.defense = defense
-        check_index = lambda i: return i == self.layer_index if isinstance(self.layer_index, int) else i in self.layer_index
+        check_index = lambda i: i == self.layer_index if isinstance(self.layer_index, int) else i in self.layer_index
         for i, m in enumerate(self.blocks):
             if check_index(i) or self.layer_index == -1:
                 m.defense = defense

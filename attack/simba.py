@@ -29,8 +29,9 @@ class SimBA(BaseAttack):
             indices = torch.randperm(3 * self.freq_dims * self.freq_dims)[:max_iters]
         elif self.order == 'diag':
             indices = diagonal_order(image_size, 3)[:max_iters]
-        elif self.order == 'self.strided':
+        elif self.order == 'strided':
             indices = block_order(image_size, 3, initial_size=self.freq_dims, stride=self.stride)[:max_iters]
+            # breakpoint()
         else:
             indices = block_order(image_size, 3)[:max_iters]
         if self.order == 'rand':

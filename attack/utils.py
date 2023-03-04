@@ -58,7 +58,7 @@ def linf_step(x, g, step_size):
 def get_l2_proj(x, new_x, eps):
     # x_clone = x.clone()
     num_dim = len(x.shape[1:])
-    # def proj(new_x):
+    # def proj(new_x):np
     delta = new_x - x
     norm_delta = delta.norm(p=2, dim=list(range(1, num_dim+1)), keepdim=True)
     return x + (norm_delta <= eps).float() * delta + (norm_delta > eps).float() * eps * delta / norm_delta
@@ -81,108 +81,108 @@ def eg_step(x, g, lr):
     return new_x
 
 # reverses the normalization transformation
-def invert_normalization(imgs, dataset):
-    if dataset == 'imagenet':
-        mean = IMAGENET_MEAN
-        std = IMAGENET_STD
-    elif dataset == 'cifar':
-        mean = CIFAR_MEAN
-        std = CIFAR_STD
-    elif dataset == 'mnist':
-        mean = MNIST_MEAN
-        std = MNIST_STD
-    imgs_trans = imgs.clone()
-    if len(imgs.size()) == 3:
-        for i in range(imgs.size(0)):
-            imgs_trans[i, :, :] = imgs_trans[i, :, :] * std[i] + mean[i]
-    else:
-        for i in range(imgs.size(1)):
-            imgs_trans[:, i, :, :] = imgs_trans[:, i, :, :] * std[i] + mean[i]
-    return imgs_trans
+# def invert_normalization(imgs, dataset):
+#     if dataset == 'imagenet':
+#         mean = IMAGENET_MEAN
+#         std = IMAGENET_STD
+#     elif dataset == 'cifar':
+#         mean = CIFAR_MEAN
+#         std = CIFAR_STD
+#     elif dataset == 'mnist':
+#         mean = MNIST_MEAN
+#         std = MNIST_STD
+#     imgs_trans = imgs.clone()
+#     if len(imgs.size()) == 3:
+#         for i in range(imgs.size(0)):
+#             imgs_trans[i, :, :] = imgs_trans[i, :, :] * std[i] + mean[i]
+#     else:
+#         for i in range(imgs.size(1)):
+#             imgs_trans[:, i, :, :] = imgs_trans[:, i, :, :] * std[i] + mean[i]
+#     return imgs_trans
 
 
-# applies the normalization transformations
-def apply_normalization(imgs, dataset):
-    if dataset == 'imagenet':
-        mean = IMAGENET_MEAN
-        std = IMAGENET_STD
-    elif dataset == 'cifar':
-        mean = CIFAR_MEAN
-        std = CIFAR_STD
-    elif dataset == 'mnist':
-        mean = MNIST_MEAN
-        std = MNIST_STD
-    else:
-        mean = [0, 0, 0]
-        std = [1, 1, 1]
-    imgs_tensor = imgs.clone()
-    if dataset == 'mnist':
-        imgs_tensor = (imgs_tensor - mean[0]) / std[0]
-    else:
-        if imgs.dim() == 3:
-            for i in range(imgs_tensor.size(0)):
-                imgs_tensor[i, :, :] = (imgs_tensor[i, :, :] - mean[i]) / std[i]
-        else:
-            for i in range(imgs_tensor.size(1)):
-                imgs_tensor[:, i, :, :] = (imgs_tensor[:, i, :, :] - mean[i]) / std[i]
-    return imgs_tensor
+# # applies the normalization transformations
+# def apply_normalization(imgs, dataset):
+#     if dataset == 'imagenet':
+#         mean = IMAGENET_MEAN
+#         std = IMAGENET_STD
+#     elif dataset == 'cifar':
+#         mean = CIFAR_MEAN
+#         std = CIFAR_STD
+#     elif dataset == 'mnist':
+#         mean = MNIST_MEAN
+#         std = MNIST_STD
+#     else:
+#         mean = [0, 0, 0]
+#         std = [1, 1, 1]
+#     imgs_tensor = imgs.clone()
+#     if dataset == 'mnist':
+#         imgs_tensor = (imgs_tensor - mean[0]) / std[0]
+#     else:
+#         if imgs.dim() == 3:
+#             for i in range(imgs_tensor.size(0)):
+#                 imgs_tensor[i, :, :] = (imgs_tensor[i, :, :] - mean[i]) / std[i]
+#         else:
+#             for i in range(imgs_tensor.size(1)):
+#                 imgs_tensor[:, i, :, :] = (imgs_tensor[:, i, :, :] - mean[i]) / std[i]
+#     return imgs_tensor
 
 
-# get most likely predictions and probabilities for a set of inputs
-def get_preds(model, inputs, dataset_name, correct_class=None, batch_size=25, return_cpu=True):
-    num_batches = int(math.ceil(inputs.size(0) / float(batch_size)))
-    softmax = torch.nn.Softmax()
-    all_preds, all_probs = None, None
-    transform = trans.Normalize(IMAGENET_MEAN, IMAGENET_STD)
-    for i in range(num_batches):
-        upper = min((i + 1) * batch_size, inputs.size(0))
-        input = apply_normalization(inputs[(i * batch_size):upper], dataset_name)
-        input_var = torch.autograd.Variable(input.cuda(), volatile=True)
-        output = softmax.forward(model.forward(input_var))
-        if correct_class is None:
-            prob, pred = output.max(1)
-        else:
-            prob, pred = output[:, correct_class], torch.autograd.Variable(torch.ones(output.size()) * correct_class)
-        if return_cpu:
-            prob = prob.data.cpu()
-            pred = pred.data.cpu()
-        else:
-            prob = prob.data
-            pred = pred.data
-        if i == 0:
-            all_probs = prob
-            all_preds = pred
-        else:
-            all_probs = torch.cat((all_probs, prob), 0)
-            all_preds = torch.cat((all_preds, pred), 0)
-    return all_preds, all_probs
+# # get most likely predictions and probabilities for a set of inputs
+# def get_preds(model, inputs, dataset_name, correct_class=None, batch_size=25, return_cpu=True):
+#     num_batches = int(math.ceil(inputs.size(0) / float(batch_size)))
+#     softmax = torch.nn.Softmax()
+#     all_preds, all_probs = None, None
+#     transform = trans.Normalize(IMAGENET_MEAN, IMAGENET_STD)
+#     for i in range(num_batches):
+#         upper = min((i + 1) * batch_size, inputs.size(0))
+#         input = apply_normalization(inputs[(i * batch_size):upper], dataset_name)
+#         input_var = torch.autograd.Variable(input.cuda(), volatile=True)
+#         output = softmax.forward(model.forward(input_var))
+#         if correct_class is None:
+#             prob, pred = output.max(1)
+#         else:
+#             prob, pred = output[:, correct_class], torch.autograd.Variable(torch.ones(output.size()) * correct_class)
+#         if return_cpu:
+#             prob = prob.data.cpu()
+#             pred = pred.data.cpu()
+#         else:
+#             prob = prob.data
+#             pred = pred.data
+#         if i == 0:
+#             all_probs = prob
+#             all_preds = pred
+#         else:
+#             all_probs = torch.cat((all_probs, prob), 0)
+#             all_preds = torch.cat((all_preds, pred), 0)
+#     return all_preds, all_probs
 
 
 # get least likely predictions and probabilities for a set of inputs
-def get_least_likely(model, inputs, dataset_name, batch_size=25, return_cpu=True):
-    num_batches = int(math.ceil(inputs.size(0) / float(batch_size)))
-    softmax = torch.nn.Softmax()
-    all_preds, all_probs = None, None
-    transform = trans.Normalize(IMAGENET_MEAN, IMAGENET_STD)
-    for i in range(num_batches):
-        upper = min((i + 1) * batch_size, inputs.size(0))
-        input = apply_normalization(inputs[(i * batch_size):upper], dataset_name)
-        input_var = torch.autograd.Variable(input.cuda(), volatile=True)
-        output = softmax.forward(model.forward(input_var))
-        prob, pred = output.min(1)
-        if return_cpu:
-            prob = prob.data.cpu()
-            pred = pred.data.cpu()
-        else:
-            prob = prob.data
-            pred = pred.data
-        if i == 0:
-            all_probs = prob
-            all_preds = pred
-        else:
-            all_probs = torch.cat((all_probs, prob), 0)
-            all_preds = torch.cat((all_preds, pred), 0)
-    return all_preds, all_probs
+# def get_least_likely(model, inputs, dataset_name, batch_size=25, return_cpu=True):
+#     num_batches = int(math.ceil(inputs.size(0) / float(batch_size)))
+#     softmax = torch.nn.Softmax()
+#     all_preds, all_probs = None, None
+#     transform = trans.Normalize(IMAGENET_MEAN, IMAGENET_STD)
+#     for i in range(num_batches):
+#         upper = min((i + 1) * batch_size, inputs.size(0))
+#         input = apply_normalization(inputs[(i * batch_size):upper], dataset_name)
+#         input_var = torch.autograd.Variable(input.cuda(), volatile=True)
+#         output = softmax.forward(model.forward(input_var))
+#         prob, pred = output.min(1)
+#         if return_cpu:
+#             prob = prob.data.cpu()
+#             pred = pred.data.cpu()
+#         else:
+#             prob = prob.data
+#             pred = pred.data
+#         if i == 0:
+#             all_probs = prob
+#             all_preds = pred
+#         else:
+#             all_probs = torch.cat((all_probs, prob), 0)
+#             all_preds = torch.cat((all_preds, pred), 0)
+#     return all_preds, all_probs
 
 
 # defines a diagonal order
