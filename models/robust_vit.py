@@ -378,7 +378,7 @@ class VisionTransformer(nn.Module):
                 drop_path=dpr[i],
                 norm_layer=norm_layer,
                 act_layer=act_layer,
-                def_position=def_position, 
+                def_position=def_position[i] if isinstance(def_position, (tuple, list)) else def_position, 
                 defense_cls=defense_cls,
                 noise_sigma=noise_sigma if isinstance(noise_sigma, (int, float)) else noise_sigma[i]
             )
