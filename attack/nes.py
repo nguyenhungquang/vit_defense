@@ -53,7 +53,10 @@ class NES(BaseAttack):
         self.sigma = sigma
         self.targeted = targeted
         self.step_size = step_size
-        # self.update_fn = 
+        if lp == 'l2':
+            self.update_fn = l2_step
+        elif lp == 'linf':
+            self.update_fn = linf_step
 
     @torch.no_grad()
     def run_one_iter(self, x, labels, n_queries=None):
@@ -69,7 +72,8 @@ class NES(BaseAttack):
             change = (self.model.loss(labels, forward_y, targeted=self.targeted) - self.model.loss(labels, backward_y, targeted=self.targeted)) / (2 * self.sigma)
             total_grad -= torch.tensor(change, device=tangent.device).reshape(-1, *[1] * num_dim) * tangent
 
-        new_x = x + self.step_size * total_grad.sign()# / total_grad.norm(p=2, dim=list(range(1, num_dim+1)), keepdim=True)
+        new_x = self.update_fn(x, total_grad, self.step_size)
+        # new_x = x + self.step_size * total_grad.sign()# / total_grad.norm(p=2, dim=list(range(1, num_dim+1)), keepdim=True)
         return new_x, 2 * n_queries #* torch.ones(x.shape[0])
 
 #     def attack(self, x, labels, n_queries, stop_criterion):

@@ -222,6 +222,11 @@ if __name__ == '__main__':
             log = utils.Logger(log_path)
             log.print(str(args.__dict__))
             log.print(str(config))
+            # mixed
+            if args.def_position == 'mix_cls_first':
+                args.def_position = ['pre_att_cls'] * 7 + ['pre_att_all'] * 5
+            elif args.def_position == 'mix_all_first':
+                args.def_position = ['pre_att_all'] * 7 + ['pre_att_cls'] * 5
             
             if not 'vit' in args.model:
                 base_model = timm.create_model(args.model, num_classes=None)

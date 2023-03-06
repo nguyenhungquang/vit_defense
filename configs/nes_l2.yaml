@@ -1,4 +1,4 @@
 lp: l2
-n_queries_each: 50
+n_queries_each: 20
 sigma: 0.1
-step_size: 0.3
+step_size: 10
