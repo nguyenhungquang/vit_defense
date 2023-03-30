@@ -2,9 +2,10 @@ import torch
 import torchvision.datasets as dset
 from torchvision import transforms
 from torch.utils.data import DataLoader
+import math
 import torchvision
 import glob
-from matplotlib import pyplot as plt
+#from matplotlib import pyplot as plt
 import numpy as np
 import torch.nn.functional as F
 import pickle
@@ -19,6 +20,7 @@ from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 from timm.models import create_model
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
+from timm.data.transforms_factory import transforms_imagenet_eval
 from torchvision import datasets as dset
 from torchvision.transforms import Compose, ToTensor, Normalize, Resize, CenterCrop
 from torch.utils.data import DataLoader, Subset
@@ -27,9 +29,11 @@ from attack.simba import *
 from attack.square_attack import *
 from attack.bandit import *
 from attack.nes import NES
+from attack.nes_adapt import NES_Adaptive
 from attack.signhunt import SignHunt
 from attack.decision import *
 from models.robust_vit import VisionTransformer
+from models.utils import create_model
 from models.wrapper import ModelWrapper
 
 import logging
@@ -59,7 +63,7 @@ np.set_printoptions(precision=5, suppress=True)
 
 
 if __name__ == '__main__':
-    attack_list = ['square_linf', 'square_l2', 'simba_dct', 'nes_l2', 'nes_linf', 'bandit_l2', 'bandit_linf', 'signhunt_l2', 'hsja_l2']
+    attack_list = ['square_linf', 'square_l2', 'simba_dct', 'nes_l2', 'nes_linf', 'bandit_l2', 'bandit_linf', 'signhunt_l2', 'hsja_l2', 'nes_adapt_linf', 'nes_adapt_l2']
     parser = argparse.ArgumentParser(description='Define hyperparameters.')
     parser.add_argument('--model', type=str, default='vit_base_patch16_224', choices=model_list, help='Model name.')
     parser.add_argument('--attack', type=str, default='square_linf', choices=attack_list, help='Attack.')
@@ -78,6 +82,8 @@ if __name__ == '__main__':
     parser.add_argument('--layer_index', nargs='*', default=-1)
     parser.add_argument('--noise_list', nargs='*', default=None)
     parser.add_argument('--stop_criterion', type=str, default='fast_exp', choices=['single', 'without_defense', 'fast_exp', 'exp', 'none'])
+    parser.add_argument('--adaptive', action='store_true')
+    parser.add_argument('--num_adapt', type=int, default=1)
     # args = parser.parse_args(
     #     '--attack=square_linf --model=pt_vit_base_patch16_224_cifar10_finetuned --n_ex=1000 --eps=12.75 --p=0.05 --n_iter=10000'.split(' '))
     args = parser.parse_args()
@@ -107,9 +113,15 @@ if __name__ == '__main__':
         # log = utils.Logger(log_path)
         # log.print('All hps: {}'.format(hps_str))
         # print('All hps: {}'.format(hps_str))
-
+        # cfg = timm.create_model(args.model).default_cfg
+        # scale_size = int(math.floor(cfg['input_size'][-2]))
+        # if cfg['interpolation'] == 'bilinear':
+        #     interpolation = torchvision.transforms.InterpolationMode.BILINEAR 
+        # elif cfg['interpolation'] == 'bicubic':
+        #     interpolation = torchvision.transforms.InterpolationMode.BICUBIC
         transform = Compose([
             Resize(224),
+            # Resize(scale_size, interpolation=interpolation),
             CenterCrop(size=(224, 224)),
             ToTensor()#,
             # Normalize(timm.data.constants.IMAGENET_DEFAULT_MEAN, timm.data.constants.IMAGENET_DEFAULT_STD)   
@@ -187,7 +199,10 @@ if __name__ == '__main__':
         elif args.def_position == 'input_noise':
             # noise_list = [2/255, 3/255, 4/255, 5/255][8/255, 7/255, 6/255]
             # noise_list = [8/255, 7/255, 6/255]
-            noise_list = [0.01, 0.03, 0.05]
+            noise_list = [0.01, 0.02, 0.03, 0.05, 0.06, 0.07, 0.08]
+        elif args.def_position == 'hidden_feature':
+            assert 'resnet' in args.model
+            noise_list = [0.01, 0.03, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25]
         elif args.def_position == 'logits':
             noise_list = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01]
         elif args.def_position == 'last_cls':
@@ -210,7 +225,7 @@ if __name__ == '__main__':
             hps_str = 'model={} defense={} n_ex={} eps={} p={} n_iter={} noise_scale={}'.format(
             args.model, args.defense, args.n_ex, args.eps, args.p, args.n_iter, noise)
             method = args.def_position#'last_cls'
-            base_dir = '{}/{}/{}/{}/'.format(args.exp_folder, args.attack + '_' + str(args.eps) + '_' + str(config), args.dataset, method + f'_layer_{args.layer_index}')
+            base_dir = '{}/{}/{}/{}/{}/'.format(args.model, args.exp_folder, args.attack + '_' + str(args.eps) + '_' + str(config), args.dataset, method + f'_layer_{args.layer_index}')
             # base_dir = 'debug/'
             log_dir = base_dir + 'log/'
             os.makedirs(log_dir, exist_ok=True)
@@ -226,42 +241,36 @@ if __name__ == '__main__':
             if args.def_position == 'mix_cls_first':
                 args.def_position = ['pre_att_cls'] * 7 + ['pre_att_all'] * 5
             elif args.def_position == 'mix_all_first':
+                noise = [0.05] * 7 + [0.1] * 5
                 args.def_position = ['pre_att_all'] * 7 + ['pre_att_cls'] * 5
             
-            if not 'vit' in args.model:
-                base_model = timm.create_model(args.model, num_classes=None)
+            # if not 'vit' in args.model:
+            #     base_model = timm.create_model(args.model, num_classes=None)
                 
-            else:
-                if 'small' in args.model:
-                    kwargs = dict(patch_size=16, embed_dim=384, depth=12, num_heads=6)
-                else:
-                    kwargs = dict()
-                base_model = VisionTransformer(weight_init='skip', num_classes=n_cls, defense_cls=args.defense, noise_sigma=noise, def_position=args.def_position, **kwargs)
-            if args.dataset == 'cifar10':
-                base_model.load_state_dict(torch.load(f'pretrain/{args.model}_{dataset_name}.pth.tar', map_location='cpu')['state_dict'])
-            elif args.dataset == 'imagenet':
-                base_model.load_state_dict(timm.create_model(args.model, pretrained=True).state_dict())
-            base_model.noise_sigma = noise
-            base_model.layer_index = args.layer_index
-            # base_model.set_defense(True)
-            # base_model = torch.jit.trace(base_model, torch.randn(200, 3, 224, 224))
-            model = ModelWrapper(base_model, num_classes=n_cls, device=device, def_position=args.def_position)
+            # else:
+            model = create_model(args.model, args.dataset, n_cls, noise, args.defense, args.def_position, device=device)
             print('done load model')
             logits_clean = model.predict(x_test, not use_numpy)
             corr_classified = (logits_clean.argmax(1) == y_test)
             acc = corr_classified.float().mean() if torch.is_tensor(corr_classified) else corr_classified.mean()
             # important to check that the model was restored correctly and the clean accuracy is high
             log.print('Clean accuracy: {:.2%}'.format(acc))
-            if acc < 0.75:
-                continue 
+            # if acc < 0.75:
+            #     continue 
 
             if args.attack == 'simba_dct':
                 attacker = SimBA(model, log, args.eps, 224, **config)
                 # _, prob, succ, queries, l2, linf = attacker.attack(x_test[corr_classified], y_test[corr_classified], args.n_iter)
                 _, prob, succ, queries, l2, linf = attacker.attack(x_test, y_test, args.n_iter, args.stop_criterion)
-            elif 'nes' in args.attack:
+            elif 'nes' in args.attack and not 'adapt' in args.attack:
                 # lp = args.attack.split('_')[1]
                 attacker = NES(model, log, args.eps, **config)
+                # y_target = utils.random_classes_except_current(y_test, n_cls) if args.targeted else y_test
+                # y_target_onehot = utils.dense_to_onehot(y_target, n_cls=n_cls)
+                attacker.attack(x_test, y_test, args.n_iter, args.stop_criterion)
+            elif 'nes_adapt' in args.attack:
+                # lp = args.attack.split('_')[1]
+                attacker = NES_Adaptive(model, log, args.eps, **config)
                 # y_target = utils.random_classes_except_current(y_test, n_cls) if args.targeted else y_test
                 # y_target_onehot = utils.dense_to_onehot(y_target, n_cls=n_cls)
                 attacker.attack(x_test, y_test, args.n_iter, args.stop_criterion)
@@ -279,7 +288,7 @@ if __name__ == '__main__':
                 # y_target_onehot = utils.dense_to_onehot(y_target, n_cls=n_cls)
                 # Note: we count the queries only across correctly classified images
                 n_queries, x_adv = square_attack(model, x_test, y_test, corr_classified, args.eps, args.n_iter,
-                                                args.p, metrics_path, args.targeted, args.loss, log, args.stop_criterion)
+                                                args.p, metrics_path, args.targeted, args.loss, log, args.stop_criterion, adaptive=args.adaptive, M=args.num_adapt)
                 print(f'Noise :{noise}, n queries: {n_queries}')
             elif 'hsja' in args.attack:
                 attacker = HSJAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=args.n_ex, use_numpy=use_numpy, **config)

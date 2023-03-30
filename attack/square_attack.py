@@ -75,6 +75,12 @@ def meta_pseudo_gaussian_pert(s):
 
     return delta
 
+def get_adaptive_output(model, x, M):
+    output = 0
+    for  _ in range(M):
+        output += model.predict(x)
+    output = output / M
+    return output
 
 def get_margin(model, x, y, logits, targeted, stop_criterion):
     if stop_criterion == 'single' or stop_criterion == 'none':
@@ -93,7 +99,7 @@ def get_margin(model, x, y, logits, targeted, stop_criterion):
         margin_min = get_remaining_idx(model, x, y)
     return margin_min
 
-def square_attack_l2(model, x, y, corr_classified, eps, n_iters, p_init, metrics_path, targeted, loss_type, log, stop_criterion):
+def square_attack_l2(model, x, y, corr_classified, eps, n_iters, p_init, metrics_path, targeted, loss_type, log, stop_criterion, adaptive=False, M=1):
     """ The L2 square attack """
     np.random.seed(0)
 
@@ -119,7 +125,10 @@ def square_attack_l2(model, x, y, corr_classified, eps, n_iters, p_init, metrics
 
     x_best = np.clip(x + delta_init / np.sqrt(np.sum(delta_init ** 2, axis=(1, 2, 3), keepdims=True)) * eps, 0, 1)
 
-    logits = model.predict(x_best)
+    if adaptive:
+        logits = get_adaptive_output(model, x_best, M)
+    else:
+        logits = model.predict(x_best)
     # base_logits = model.predict(x_best, defense=False)
     loss_min = model.loss(y, logits, targeted, loss_type=loss_type)
     # margin_min = model.loss(y, base_logits, targeted, loss_type='margin_loss')
@@ -129,7 +138,7 @@ def square_attack_l2(model, x, y, corr_classified, eps, n_iters, p_init, metrics
     time_start = time.time()
     s_init = int(np.sqrt(p_init * n_features / c))
     metrics = np.zeros([n_iters, 7])
-    for i_iter in range(n_iters):
+    for i_iter in range(n_iters // M):
         if stop_criterion == 'none':
             idx_to_fool = torch.ones(n_ex_total).bool()
         else:
@@ -185,7 +194,11 @@ def square_attack_l2(model, x, y, corr_classified, eps, n_iters, p_init, metrics
         x_new = np.clip(x_new, min_val, max_val)
         curr_norms_image = np.sqrt(np.sum((x_new - x_curr) ** 2, axis=(1, 2, 3), keepdims=True))
 
-        logits = model.predict(x_new)
+        # logits = model.predict(x_new)
+        if adaptive:
+            logits = get_adaptive_output(model, x_new, M)
+        else:
+            logits = model.predict(x_new)
         # base_logits = model.predict(x_new, defense=False)
         loss = model.loss(y_curr, logits, targeted, loss_type=loss_type)
         # margin = model.loss(y_curr, base_logits, targeted, loss_type='margin_loss')
@@ -207,7 +220,7 @@ def square_attack_l2(model, x, y, corr_classified, eps, n_iters, p_init, metrics
         time_total = time.time() - time_start
         log.print(
             '{}: acc={:.2%} acc_corr={:.2%} avg#q_ae={:.1f} med#q_ae={:.1f} {}, n_ex={}, {:.0f}s, loss={:.3f}, max_pert={:.1f}, impr={:.0f}'.
-                format(i_iter + 1, acc, acc_corr, mean_nq_ae, median_nq_ae, hps_str, x.shape[0], time_total,
+                format((i_iter + 1) * M, acc, acc_corr, mean_nq_ae, median_nq_ae, hps_str, x.shape[0], time_total,
                        np.mean(margin_min), np.amax(curr_norms_image), np.sum(idx_improved)))
         metrics[i_iter] = [acc, acc_corr, mean_nq, mean_nq_ae, median_nq, margin_min.mean(), time_total]
         if (i_iter <= 500 and i_iter % 500) or (i_iter > 100 and i_iter % 500) or i_iter + 1 == n_iters or acc == 0:
@@ -223,7 +236,7 @@ def square_attack_l2(model, x, y, corr_classified, eps, n_iters, p_init, metrics
     return n_queries, x_best
 
 
-def square_attack_linf(model, x, y, corr_classified, eps, n_iters, p_init, metrics_path, targeted, loss_type, log, stop_criterion):
+def square_attack_linf(model, x, y, corr_classified, eps, n_iters, p_init, metrics_path, targeted, loss_type, log, stop_criterion, adaptive=False, M=1):
     """ The Linf square attack """
     np.random.seed(0)  # important to leave it here as well
     min_val, max_val = 0, 1 if x.max() <= 1 else 255
@@ -237,7 +250,11 @@ def square_attack_linf(model, x, y, corr_classified, eps, n_iters, p_init, metri
     init_delta = np.random.choice([-eps, eps], size=[x.shape[0], c, 1, w])
     x_best = np.clip(x + init_delta, min_val, max_val)
 
-    logits = model.predict(x_best)
+    # logits = model.predict(x_best)
+    if adaptive:
+        logits = get_adaptive_output(model, x_best, M)
+    else:
+        logits = model.predict(x_best)
     loss_min = model.loss(y, logits, targeted, loss_type=loss_type)
     
     margin_min = get_margin(model, x_best, y, logits, targeted, stop_criterion)
@@ -246,7 +263,7 @@ def square_attack_linf(model, x, y, corr_classified, eps, n_iters, p_init, metri
 
     time_start = time.time()
     metrics = np.zeros([n_iters, 7])
-    for i_iter in range(n_iters - 1):
+    for i_iter in range(n_iters // M - 1):
         if stop_criterion == 'none':
             idx_to_fool = torch.ones(n_ex_total).bool()
         else:
@@ -271,7 +288,11 @@ def square_attack_linf(model, x, y, corr_classified, eps, n_iters, p_init, metri
 
         x_new = np.clip(x_curr + deltas, min_val, max_val)
 
-        logits = model.predict(x_new)
+        # logits = model.predict(x_new)
+        if adaptive:
+            logits = get_adaptive_output(model, x_new, M)
+        else:
+            logits = model.predict(x_new)
         loss = model.loss(y_curr, logits, targeted, loss_type=loss_type)
         ## base model
         # base_logits = model.predict(x_new, defense=False)
@@ -298,7 +319,7 @@ def square_attack_linf(model, x, y, corr_classified, eps, n_iters, p_init, metri
         avg_margin_min = np.mean(margin_min)
         time_total = time.time() - time_start
         log.print('{}: acc={:.2%} acc_corr={:.2%} avg#q_ae={:.2f} med#q={:.1f}, avg_margin={:.2f} (n_ex={}, eps={:.3f}, {:.2f}s)'.
-            format(i_iter+1, acc, acc_corr, mean_nq_ae, median_nq_ae, avg_margin_min, x_curr.shape[0], eps, time_total))
+            format((i_iter+1) * M, acc, acc_corr, mean_nq_ae, median_nq_ae, avg_margin_min, x_curr.shape[0], eps, time_total))
 
         metrics[i_iter] = [acc, acc_corr, mean_nq, mean_nq_ae, median_nq_ae, margin_min.mean(), time_total]
         if (i_iter <= 500 and i_iter % 20 == 0) or (i_iter > 100 and i_iter % 50 == 0) or i_iter + 1 == n_iters or acc == 0:

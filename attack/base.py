@@ -78,7 +78,7 @@ class BaseAttack:
             # breakpoint()
             # return torch.mode(preds, dim=1)[0]
 
-        if stop_criterion == 'single':
+        if stop_criterion == 'single' or stop_criterion == 'none':
             pred = self.model.predict(x, torch.is_tensor(x)).argmax(1)
             out = pred == y
         elif stop_criterion == 'without_defense':
@@ -90,6 +90,14 @@ class BaseAttack:
             if sum(~out) > 0:
                 out[~out] = verify_pred(self.model, x[~out], 9, y[~out])
         return out# != y
+
+    def get_adaptive_output(self, x, M):
+        output = 0
+        for  _ in range(M):
+            output += self.model.predict(x, True)
+        output = output / M
+        return output
+
 
     def get_loss(self, x, y):
         """
@@ -130,4 +138,5 @@ class BaseAttack:
             self.log.print(f'Iter: {i}, Query: {total_queries}, Acc: {acc:.3f}')
             if total_queries >= n_queries:
                 break
+        return x
             

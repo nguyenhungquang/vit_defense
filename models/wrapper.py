@@ -4,7 +4,7 @@ import utils
 import math
 
 class ModelWrapper:
-    def __init__(self, model, num_classes=10, def_position=None, device='cpu'):
+    def __init__(self, model, num_classes=10, def_position=None, device='cpu', mean=None, std=None):
         self.model = model
         self.num_classes = num_classes
         self.model.to(device)
@@ -12,13 +12,15 @@ class ModelWrapper:
         self.device = device
         # self.mean = np.reshape([0.485, 0.456, 0.406], [1, 3, 1, 1])
         # self.std = np.reshape([0.229, 0.224, 0.225], [1, 3, 1, 1])
-        self.mean = np.reshape([0.5, 0.5, 0.5], [1, 3, 1, 1])
-        self.std = np.reshape([0.5, 0.5, 0.5], [1, 3, 1, 1])
+        self.mean = mean if mean is not None else [0.5, 0.5, 0.5]
+        self.std = std if std is not None else [0.5, 0.5, 0.5]
+        self.mean = np.reshape(self.mean, [1, 3, 1, 1])
+        self.std = np.reshape(self.std, [1, 3, 1, 1])
         self.mean_torch = torch.tensor(self.mean, device=device, dtype=torch.float32)
         self.std_torch = torch.tensor(self.std, device=device, dtype=torch.float32)
         self.def_position = def_position
         self.model.eval()
-        self.model.set_defense(True)
+        # self.model.set_defense(True)
         # self.model = torch.jit.trace(self.model, torch.randn(self.batch_size, 3, 224, 224, device=device))
 
     def __call__(self, x):
