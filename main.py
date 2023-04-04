@@ -113,15 +113,15 @@ if __name__ == '__main__':
         # log = utils.Logger(log_path)
         # log.print('All hps: {}'.format(hps_str))
         # print('All hps: {}'.format(hps_str))
-        # cfg = timm.create_model(args.model).default_cfg
-        # scale_size = int(math.floor(cfg['input_size'][-2]))
-        # if cfg['interpolation'] == 'bilinear':
-        #     interpolation = torchvision.transforms.InterpolationMode.BILINEAR 
-        # elif cfg['interpolation'] == 'bicubic':
-        #     interpolation = torchvision.transforms.InterpolationMode.BICUBIC
+        cfg = timm.create_model(args.model).default_cfg
+        scale_size = int(math.floor(cfg['input_size'][-2]))
+        if cfg['interpolation'] == 'bilinear':
+            interpolation = torchvision.transforms.InterpolationMode.BILINEAR 
+        elif cfg['interpolation'] == 'bicubic':
+            interpolation = torchvision.transforms.InterpolationMode.BICUBIC
         transform = Compose([
-            Resize(224),
-            # Resize(scale_size, interpolation=interpolation),
+            # Resize(224),
+            Resize(scale_size, interpolation=interpolation),
             CenterCrop(size=(224, 224)),
             ToTensor()#,
             # Normalize(timm.data.constants.IMAGENET_DEFAULT_MEAN, timm.data.constants.IMAGENET_DEFAULT_STD)   
@@ -199,10 +199,10 @@ if __name__ == '__main__':
         elif args.def_position == 'input_noise':
             # noise_list = [2/255, 3/255, 4/255, 5/255][8/255, 7/255, 6/255]
             # noise_list = [8/255, 7/255, 6/255]
-            noise_list = [0.01, 0.02, 0.03, 0.05, 0.06, 0.07, 0.08]
+            noise_list = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08]
         elif args.def_position == 'hidden_feature':
-            assert 'resnet' in args.model
-            noise_list = [0.01, 0.03, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25]
+            # assert 'resnet' in args.model
+            noise_list = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.075, 0.1, 0.15, 0.2, 0.25]
         elif args.def_position == 'logits':
             noise_list = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01]
         elif args.def_position == 'last_cls':
