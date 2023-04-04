@@ -1,9 +1,18 @@
 import types
 import torch
+import torch.nn as nn
 import timm
 
 from .robust_vit import VisionTransformer
 from .wrapper import ModelWrapper
+
+class RandomDefense(nn.Module):
+    def __init__(self, noise) -> None:
+        super().__init__()
+        self.noise = noise
+
+    def forward(self, x):
+        return x + self.noise * torch.randn_like(x)
 
 def defense_token(x, defense_type, noise_sigma):
     if defense_type == 'gauss_filter':
@@ -51,6 +60,10 @@ def add_defense(model_name, model, defense_type, def_position, noise):
                     x = l(x)
                 return x
             model.forward_features = types.MethodType(forward_features_new, model)
+    if 'deit' in model_name:
+        if def_position == 'hidden_feature':
+            model.blocks = nn.Sequential(*sum([[RandomDefense(noise), b] for b in model.blocks], []))
+            
     return model
 
 def create_model(model_name, dataset, n_cls, noise, defense, def_position, device='cpu'):

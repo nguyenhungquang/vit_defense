@@ -65,7 +65,7 @@ np.set_printoptions(precision=5, suppress=True)
 if __name__ == '__main__':
     attack_list = ['square_linf', 'square_l2', 'simba_dct', 'nes_l2', 'nes_linf', 'bandit_l2', 'bandit_linf', 'signhunt_l2', 'hsja_l2', 'nes_adapt_linf', 'nes_adapt_l2']
     parser = argparse.ArgumentParser(description='Define hyperparameters.')
-    parser.add_argument('--model', type=str, default='vit_base_patch16_224', choices=model_list, help='Model name.')
+    parser.add_argument('--model', type=str, default='vit_base_patch16_224', help='Model name.')
     parser.add_argument('--attack', type=str, default='square_linf', choices=attack_list, help='Attack.')
     parser.add_argument('--exp_folder', type=str, default='exps_balance_mean', help='Experiment folder to store all output.')
     parser.add_argument('--gpu', type=str, default='3', help='GPU number. Multiple GPUs are possible for PT models.')
