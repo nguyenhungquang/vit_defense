@@ -32,11 +32,11 @@ class ModelWrapper:
 
     def predict(self, x, return_tensor=False, defense=True):
         # self.model.set_defense(defense)
-        if self.def_position == 'input_noise' and defense:
-            # max_norm = np.random.exponential(scale=1.0, size=None)
-            # pert = np.random.uniform(-max_norm, max_norm, size=x.shape)
-            # x = x + pert
-            x = x + np.random.normal(scale=self.model.noise_sigma, size=x.shape)
+        # if self.def_position == 'input_noise' and defense:
+        #     # max_norm = np.random.exponential(scale=1.0, size=None)
+        #     # pert = np.random.uniform(-max_norm, max_norm, size=x.shape)
+        #     # x = x + pert
+        #     x = x + np.random.normal(scale=self.model.noise_sigma, size=x.shape)
         x = (x - self.mean) / self.std
         x = x.float() if torch.is_tensor(x) else x.astype(np.float32)
         if self.def_position == 'feature':
@@ -55,6 +55,8 @@ class ModelWrapper:
             for i in range(n_batches):
                 x_batch = x[i*self.batch_size:(i+1)*self.batch_size]
                 x_batch_torch = torch.as_tensor(x_batch).to(self.device)
+                if self.def_position == 'input_noise' and defense:
+                    x_batch_torch = x_batch_torch + self.model.noise_sigma * torch.randn_like(x_batch_torch) / self.std_torch
             # for x_batch in loader:
             #     x_batch_torch = x_batch.to(self.device)
                 
