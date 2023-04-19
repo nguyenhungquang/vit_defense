@@ -14,7 +14,8 @@ class Logger:
         print(message)
         if self.path != '':
             with open(self.path, 'a') as f:
-                f.write(message + '\n')
+                f.write(message)
+                f.write('\n')
                 f.flush()
 
 

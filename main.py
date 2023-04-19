@@ -33,7 +33,7 @@ from attack.nes_adapt import NES_Adaptive
 from attack.signhunt import SignHunt
 from attack.decision import *
 from models.robust_vit import VisionTransformer
-from models.utils import create_model
+from models.utils import create_robust_model
 from models.wrapper import ModelWrapper
 
 import logging
@@ -41,14 +41,13 @@ logging.getLogger().setLevel(logging.CRITICAL)
 import warnings
 warnings.filterwarnings('ignore')
 
-model_list = ['resnet50', 'vit_base_patch16_224-224']
+model_list = ['resnet50', 'resnet50_torchvision', 'vgg19_bn', 'vit_base_patch16_224-224']
 
 import math
 
 import argparse
 import time
 import numpy as np
-import data
 import models
 import os
 import utils
@@ -63,7 +62,7 @@ np.set_printoptions(precision=5, suppress=True)
 
 
 if __name__ == '__main__':
-    attack_list = ['square_linf', 'square_l2', 'simba_dct', 'nes_l2', 'nes_linf', 'bandit_l2', 'bandit_linf', 'signhunt_l2', 'hsja_l2', 'nes_adapt_linf', 'nes_adapt_l2']
+    attack_list = ['square_linf', 'square_l2', 'simba_dct', 'nes_l2', 'nes_linf', 'bandit_l2', 'bandit_linf', 'signhunt_l2', 'signhunt_linf', 'hsja_l2', 'nes_adapt_linf', 'nes_adapt_l2']
     parser = argparse.ArgumentParser(description='Define hyperparameters.')
     parser.add_argument('--model', type=str, default='vit_base_patch16_224', help='Model name.')
     parser.add_argument('--attack', type=str, default='square_linf', choices=attack_list, help='Attack.')
@@ -104,7 +103,7 @@ if __name__ == '__main__':
         
         # args.eps = args.eps / 255.0 if dataset == 'imagenet' else args.eps  # for mnist and cifar10 we leave as it is
         batch_size = 50 #data.bs_dict[dataset]
-        n_cls = 1000 if dataset == 'imagenet' else 10
+        n_cls = 1000 if dataset == 'imagenet' or dataset == 'imagenet_baseline' else 10
         gpu_memory = 0.5 if dataset == 'mnist' and args.n_ex > 1000 else 0.15 if dataset == 'mnist' else 0.99
 
         # log_path = '{}/{}.log'.format(args.exp_folder, hps_str)
@@ -113,12 +112,16 @@ if __name__ == '__main__':
         # log = utils.Logger(log_path)
         # log.print('All hps: {}'.format(hps_str))
         # print('All hps: {}'.format(hps_str))
-        cfg = timm.create_model(args.model).default_cfg
-        scale_size = int(math.floor(cfg['input_size'][-2]))
-        if cfg['interpolation'] == 'bilinear':
-            interpolation = torchvision.transforms.InterpolationMode.BILINEAR 
-        elif cfg['interpolation'] == 'bicubic':
-            interpolation = torchvision.transforms.InterpolationMode.BICUBIC
+        if 'torchvision' not in args.model:
+            cfg = timm.create_model(args.model).default_cfg
+            scale_size = int(math.floor(cfg['input_size'][-2] / cfg['crop_pct']))
+            if cfg['interpolation'] == 'bilinear':
+                interpolation = torchvision.transforms.InterpolationMode.BILINEAR 
+            elif cfg['interpolation'] == 'bicubic':
+                interpolation = torchvision.transforms.InterpolationMode.BICUBIC
+        else:
+            scale_size = 224
+            interpolation=torchvision.transforms.InterpolationMode.BILINEAR
         transform = Compose([
             # Resize(224),
             Resize(scale_size, interpolation=interpolation),
@@ -141,36 +144,39 @@ if __name__ == '__main__':
                 dataset = dset.CIFAR10('~/quang.nh/data', train=False, download=True, transform=transform)  
             elif args.dataset == 'imagenet':
                 dataset = dset.ImageFolder('data/imagenet/val', transform=transform)
-            # loader = DataLoader(dataset, batch_size=args.n_ex, shuffle=False, num_workers=8)
-            # x_test, y_test = next(iter(loader))
-            def get_val_data(dataset, n_cls, n_ex):
-                assert n_ex % n_cls == 0
-                n_samples_each = n_ex // n_cls
-                loader = DataLoader(dataset, batch_size=128, num_workers=4, shuffle=False, pin_memory=True)
-                iter_loader = iter(loader)
-                img_size = dataset[0][0].shape
-                # x = torch.zeros(n_cls, n_samples_each, *img_size)
-                x = [torch.zeros(0, *img_size) for _ in range(n_cls)]
-                # y = torch.ones(n_cls, n_samples_each) * -1
-                y = [torch.zeros(0) for _ in range(n_cls)]
-                while sum([len(_) != n_samples_each for _ in y]) > 0:
-                    # print(sum([len(_) != n_samples_each for _ in y]))
-                    img, labels = next(iter_loader)
-                    for l in torch.unique(labels):
-                        # img[l, :c] 
-                        curr_n_ex = y[l].shape[0]
-                        if curr_n_ex < n_samples_each:
-                            x[l] = torch.cat([x[l], img[labels == l][:n_samples_each - curr_n_ex]])
-                            y[l] = torch.cat([y[l], labels[labels == l][:n_samples_each - curr_n_ex]])
-                        # x[l].append(img[labels == l])
-                        # y[l].append(labels[labels == l])
-                x = torch.cat(x)
-                y = torch.cat(y).to(int)
-                return x, y
-            x_test, y_test = get_val_data(dataset, n_cls, args.n_ex)
-            torch.save((x_test, y_test), f'cache/{args.dataset}.pth')
+            if args.dataset == 'imagenet_baseline':
+                dataset = dset.ImageFolder('data/Sample_1000', transform=transform)
+                loader = DataLoader(dataset, batch_size=args.n_ex, shuffle=False, num_workers=8)
+                x_test, y_test = next(iter(loader))
+            else:
+                def get_val_data(dataset, n_cls, n_ex):
+                    assert n_ex % n_cls == 0
+                    n_samples_each = n_ex // n_cls
+                    loader = DataLoader(dataset, batch_size=128, num_workers=4, shuffle=False, pin_memory=True)
+                    iter_loader = iter(loader)
+                    img_size = dataset[0][0].shape
+                    # x = torch.zeros(n_cls, n_samples_each, *img_size)
+                    x = [torch.zeros(0, *img_size) for _ in range(n_cls)]
+                    # y = torch.ones(n_cls, n_samples_each) * -1
+                    y = [torch.zeros(0) for _ in range(n_cls)]
+                    while sum([len(_) != n_samples_each for _ in y]) > 0:
+                        # print(sum([len(_) != n_samples_each for _ in y]))
+                        img, labels = next(iter_loader)
+                        for l in torch.unique(labels):
+                            # img[l, :c] 
+                            curr_n_ex = y[l].shape[0]
+                            if curr_n_ex < n_samples_each:
+                                x[l] = torch.cat([x[l], img[labels == l][:n_samples_each - curr_n_ex]])
+                                y[l] = torch.cat([y[l], labels[labels == l][:n_samples_each - curr_n_ex]])
+                            # x[l].append(img[labels == l])
+                            # y[l].append(labels[labels == l])
+                    x = torch.cat(x)
+                    y = torch.cat(y).to(int)
+                    return x, y
+                x_test, y_test = get_val_data(dataset, n_cls, args.n_ex)
+                torch.save((x_test, y_test), f'cache/{args.dataset}.pth')
 
-        
+        # breakpoint()
         # print('Done load data')
         
         # print(x_test.min(), x_test.max())
@@ -202,7 +208,9 @@ if __name__ == '__main__':
             noise_list = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08]
         elif args.def_position == 'hidden_feature':
             # assert 'resnet' in args.model
+
             noise_list = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.075, 0.1, 0.15, 0.2, 0.25]
+
         elif args.def_position == 'logits':
             noise_list = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01]
         elif args.def_position == 'last_cls':
@@ -248,16 +256,21 @@ if __name__ == '__main__':
             #     base_model = timm.create_model(args.model, num_classes=None)
                 
             # else:
-            model = create_model(args.model, args.dataset, n_cls, noise, args.defense, args.def_position, device=device)
+            model = create_robust_model(args.model, args.dataset, n_cls, noise, args.defense, args.def_position, device=device, layer_index=args.layer_index)
             print('done load model')
-            logits_clean = model.predict(x_test, not use_numpy)
-            corr_classified = (logits_clean.argmax(1) == y_test)
-            acc = corr_classified.float().mean() if torch.is_tensor(corr_classified) else corr_classified.mean()
+            mean_acc = 0
+            for _ in range(5):
+                logits_clean = model.predict(x_test, not use_numpy)
+                corr_classified = (logits_clean.argmax(1) == y_test)
+                acc = corr_classified.float().mean() if torch.is_tensor(corr_classified) else corr_classified.mean()
+                mean_acc += acc
+            mean_acc /= 5
             # important to check that the model was restored correctly and the clean accuracy is high
-            log.print('Clean accuracy: {:.2%}'.format(acc))
+            log.print('Clean accuracy: {:.2%}'.format(mean_acc))
             # if acc < 0.75:
             #     continue 
-
+            # x_test = x_test[corr_classified]
+            # y_test = y_test[corr_classified]
             if args.attack == 'simba_dct':
                 attacker = SimBA(model, log, args.eps, 224, **config)
                 # _, prob, succ, queries, l2, linf = attacker.attack(x_test[corr_classified], y_test[corr_classified], args.n_iter)

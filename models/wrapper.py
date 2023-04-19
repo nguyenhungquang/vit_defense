@@ -1,34 +1,52 @@
 import torch
+import torch.nn as nn
 import numpy as np
 import utils
 import math
 
+class Normalization(nn.Module):
+    def __init__(self, mean, std):
+        super().__init__()
+        self.mean = nn.Parameter(torch.from_numpy(mean))
+        self.std = nn.Parameter(torch.from_numpy(std))
+
+    def forward(self, x):
+        x = (x - self.mean) / self.std
+        return x
+
 class ModelWrapper:
     def __init__(self, model, num_classes=10, def_position=None, device='cpu', mean=None, std=None):
-        self.model = model
+        
         self.num_classes = num_classes
-        self.model.to(device)
         self.batch_size = 128
         self.device = device
         # self.mean = np.reshape([0.485, 0.456, 0.406], [1, 3, 1, 1])
         # self.std = np.reshape([0.229, 0.224, 0.225], [1, 3, 1, 1])
         self.mean = mean if mean is not None else [0.5, 0.5, 0.5]
         self.std = std if std is not None else [0.5, 0.5, 0.5]
-        self.mean = np.reshape(self.mean, [1, 3, 1, 1])
-        self.std = np.reshape(self.std, [1, 3, 1, 1])
-        self.mean_torch = torch.tensor(self.mean, device=device, dtype=torch.float32)
-        self.std_torch = torch.tensor(self.std, device=device, dtype=torch.float32)
+        self.mean = np.reshape(self.mean, [1, 3, 1, 1]).astype(np.single)
+        self.std = np.reshape(self.std, [1, 3, 1, 1]).astype(np.single)
+        # self.mean_torch = torch.tensor(self.mean, device=device, dtype=torch.float32)
+        # self.std_torch = torch.tensor(self.std, device=device, dtype=torch.float32)
         self.def_position = def_position
+        self.model = nn.Sequential(Normalization(self.mean, self.std), model)
+        self.model.noise_sigma = model.noise_sigma
+        self.model.to(device)
         self.model.eval()
         # self.model.set_defense(True)
         # self.model = torch.jit.trace(self.model, torch.randn(self.batch_size, 3, 224, 224, device=device))
 
     def __call__(self, x):
-        if self.def_position == 'input_noise':
-            x = x + np.random.normal(scale=self.model.noise_sigma, size=x.shape).astype(np.float32)
+        # if self.def_position == 'input_noise':
+        #     x = x + np.random.normal(scale=self.model.noise_sigma, size=x.shape).astype(np.float32)
         x = x.to(self.device)
-        x = (x - self.mean_torch) / self.std_torch
-        return self.model(x).cpu()
+        if self.def_position == 'input_noise':
+            x = x + self.model.noise_sigma * torch.randn_like(x)
+        # x = (x - self.mean_torch) / self.std_torch
+        out = self.model(x)
+        if self.def_position == 'logits':
+            out = out + self.model.noise_sigma * torch.randn_like(out)
+        return out#.cpu()
 
     def predict(self, x, return_tensor=False, defense=True):
         # self.model.set_defense(defense)
@@ -56,12 +74,14 @@ class ModelWrapper:
                 x_batch = x[i*self.batch_size:(i+1)*self.batch_size]
                 x_batch_torch = torch.as_tensor(x_batch).to(self.device)
                 if self.def_position == 'input_noise' and defense:
-                    x_batch_torch = x_batch_torch + self.model.noise_sigma * torch.randn_like(x_batch_torch) #/ self.std_torch
-                x_batch_torch = (x_batch_torch - self.mean_torch) / self.std_torch
+                    x_batch_torch = x_batch_torch + self.model.noise_sigma * torch.randn_like(x_batch_torch) 
+                # x_batch_torch = (x_batch_torch - self.mean_torch) / self.std_torch
             # for x_batch in loader:
             #     x_batch_torch = x_batch.to(self.device)
-                
-                logits = self.model(x_batch_torch)[:, :self.num_classes].cpu()
+                logits = self.model(x_batch_torch)[:, :self.num_classes]
+                if self.def_position == 'logits':
+                    logits = logits + self.model.noise_sigma * torch.randn_like(logits)
+                logits = logits.cpu()
                 if not return_tensor:
                     logits = logits.numpy()
                 logits_list.append(logits)

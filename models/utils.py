@@ -28,7 +28,9 @@ def defense_token(x, defense_type, noise_sigma):
     elif defense_type == 'identical':
         return x
 
-def add_defense(model_name, model, defense_type, def_position, noise):
+def add_defense(model_name, model, defense_type, def_position, noise, layer_index=-1):
+    if isinstance(layer_index, int):
+        layer_index = [layer_index]
     if 'resnet' in model_name:
         if def_position == 'hidden_feature':
             def forward_features_new(self, x):
@@ -40,13 +42,21 @@ def add_defense(model_name, model, defense_type, def_position, noise):
                 # if self.grad_checkpointing and not torch.jit.is_scripting():
                 #     x = checkpoint_seq([self.layer1, self.layer2, self.layer3, self.layer4], x, flatten=True)
                 # else:
-                x = defense_token(x, defense_type, noise)
+                if 0 in layer_index or -1 in layer_index:
+                    x = defense_token(x, defense_type, noise)
+                
                 x = self.layer1(x)
-                x = defense_token(x, defense_type, noise)
+                if 1 in layer_index or -1 in layer_index:
+                    x = defense_token(x, defense_type, noise)
+                
                 x = self.layer2(x)
-                x = defense_token(x, defense_type, noise)
+                if 2 in layer_index or -1 in layer_index:
+                    x = defense_token(x, defense_type, noise)
+                
                 x = self.layer3(x)
-                x = defense_token(x, defense_type, noise)
+                if 3 in layer_index or -1 in layer_index:
+                    x = defense_token(x, defense_type, noise)
+                
                 x = self.layer4(x)
                 return x
 
@@ -62,14 +72,20 @@ def add_defense(model_name, model, defense_type, def_position, noise):
             model.forward_features = types.MethodType(forward_features_new, model)
     if 'deit' in model_name:
         if def_position == 'hidden_feature':
-            model.blocks = nn.Sequential(*sum([[RandomDefense(noise), b] for b in model.blocks], []))
-            
+            model.blocks = nn.Sequential(*sum([[RandomDefense(noise), b] if i in layer_index or -1 in layer_index else [b] for i, b in enumerate(model.blocks)], []))
+    if 'mixer' in model_name or 'resmlp' in model_name:
+        if def_position == 'hidden_feature':
+            model.blocks = nn.Sequential(*sum([[RandomDefense(noise), b] if i in layer_index or -1 in layer_index else [b] for i, b in enumerate(model.blocks)], []))
+    if 'poolformer' in model_name:
+        if def_position == 'hidden_feature':
+            for i in range(len(model.network)):
+                if type(model.network[i]).__name__ == 'Sequential':
+                    model.network[i] = nn.Sequential(*sum([[RandomDefense(noise), b] if type(b).__name__ == 'PoolFormerBlock' else [b] for b in model.network[i] ], []))
     return model
 
-def create_model(model_name, dataset, n_cls, noise, defense, def_position, device='cpu'):
-    if 'vit' not in model_name:
+def create_robust_model(model_name, dataset, n_cls, noise, defense, def_position, device='cpu', layer_index=-1):
+    if 'vit' not in model_name and 'torchvision' not in model_name:
         base_model = timm.create_model(model_name, pretrained=False)
-        base_model = add_defense(model_name, base_model, defense, def_position, noise)
     elif 'vit' in model_name:
         if 'small' in model_name:
             kwargs = dict(patch_size=16, embed_dim=384, depth=12, num_heads=6)
@@ -77,15 +93,28 @@ def create_model(model_name, dataset, n_cls, noise, defense, def_position, devic
             kwargs = dict()
         base_model = VisionTransformer(weight_init='skip', num_classes=n_cls, defense_cls=defense, noise_sigma=noise, def_position=def_position, **kwargs)
         base_model.default_cfg = timm.create_model(model_name).default_cfg
-        base_model.layer_index = -1
+        base_model.layer_index = layer_index
         base_model.set_defense(True)
     if dataset == 'cifar10':
-        base_model.load_state_dict(torch.load(f'pretrain/{model_name}_{dataset}.pth.tar', map_location='cpu')['state_dict'])
-    elif dataset == 'imagenet':
+        model_path = model_name.replace('.', '_')
+        base_model.load_state_dict(torch.load(f'pretrain/{model_path}_{dataset}.pth.tar', map_location='cpu')['state_dict'])
+    elif (dataset == 'imagenet' or dataset == 'imagenet_baseline') and 'torchvision' not in model_name:
         base_model.load_state_dict(timm.create_model(model_name, pretrained=True).state_dict())
-    base_model.noise_sigma = noise
+            
+    
     # base_model.layer_index = layer_index
     # base_model.set_defense(True)
     # base_model = torch.jit.trace(base_model, torch.randn(200, 3, 224, 224))
-    model = ModelWrapper(base_model, num_classes=n_cls, device=device, def_position=def_position, mean=base_model.default_cfg['mean'], std=base_model.default_cfg['std'])
+    if 'torchvision' in model_name:
+        import torchvision
+        base_model = torchvision.models.resnet50(pretrained=True)
+        mean = [0.485, 0.456, 0.406]
+        std = [0.229, 0.224, 0.225]
+    else:
+        mean = base_model.default_cfg['mean']
+        std = base_model.default_cfg['std']
+    base_model.noise_sigma = noise
+    if 'vit' not in model_name and 'torchvision' not in model_name:
+        base_model = add_defense(model_name, base_model, defense, def_position, noise, layer_index)
+    model = ModelWrapper(base_model, num_classes=n_cls, device=device, def_position=def_position, mean=mean, std=std)
     return model

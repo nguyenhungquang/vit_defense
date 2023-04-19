@@ -14,7 +14,7 @@ class SignHunt(BaseAttack):
         if lp == 'l2':
             self.prior_step = step
             self.update_fn = l2_step
-        elif self.p == 'linf':
+        elif self.lp == 'linf':
             self.prior_step = eg_step
             self.update_fn = linf_step
 

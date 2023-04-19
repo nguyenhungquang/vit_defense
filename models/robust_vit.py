@@ -480,8 +480,7 @@ class VisionTransformer(nn.Module):
         # add noise to token
         # x[:, 0] = self.defense_token(x[:, 0])
         x = self.forward_head(x)
-        if self.def_position == 'logits' and self.defense:
-            x = self.defense_token(x)
+        
         return x
 
     @torch.no_grad()

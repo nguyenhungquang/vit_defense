@@ -115,6 +115,7 @@ class BaseAttack:
         # queries = torch.zeros(n_ex, device=x.device)
         # pred = self.get_pred(x, stop_criterion, labels)
         remaining = self.get_remaining(x, stop_criterion, labels)
+        queries_list = [1] * (remaining.shape[0] - remaining.sum()).item()
         
         base_x = x.clone()
         if self.lp == 'l2':
@@ -127,6 +128,9 @@ class BaseAttack:
             else:
                 self.idx_to_fool = remaining#pred == labels
                 x, labels, base_x = x[self.idx_to_fool], labels[self.idx_to_fool], base_x[self.idx_to_fool]
+            if x.shape[0] == 0:
+                print('No sample left')
+                break
             x, q = self.run_one_iter(x, labels)
             total_queries += q
             x = projection(base_x, x, self.eps)
@@ -134,9 +138,12 @@ class BaseAttack:
             # # breakpoint()
             # acc = (pred == labels).sum() / n_ex
             remaining = self.get_remaining(x, stop_criterion, labels)
+            queries_list += [total_queries] * (remaining.shape[0] - remaining.sum()).item()
+            # breakpoint()
             acc = remaining.sum() / n_ex
-            self.log.print(f'Iter: {i}, Query: {total_queries}, Acc: {acc:.3f}')
+            self.log.print(f'Iter: {i}, Query: {total_queries}, Acc: {acc:.3f}, Avg queries: {np.mean(queries_list):.3f}')
             if total_queries >= n_queries:
+                print('Reach limit query')
                 break
         return x
             
