@@ -73,6 +73,7 @@ class HSJAttack(DecisionBlackBoxAttack):
 
         self.query = 0
         # Initialize.
+        # breakpoint()
         perturbed = self.initialize(input_xi, label_or_target)
         
 
@@ -80,7 +81,7 @@ class HSJAttack(DecisionBlackBoxAttack):
         perturbed, dist_post_update = self.binary_search_batch(input_xi, perturbed, label_or_target, theta)
         dist = self.compute_distance(perturbed, input_xi)
 
-        for j in np.arange(1000):
+        for j in np.arange(10000):
                 # Choose delta.
                 if j==1:
                     delta = 0.1 * (self.ub - self.lb)
@@ -150,10 +151,10 @@ class HSJAttack(DecisionBlackBoxAttack):
         self.query += images.shape[0]
         la = self.predict_label(images).cpu().numpy()
         if self.targeted:
-                return (la==label).all()
+                return (la==label)#.all()
         else:
                 # breakpoint()
-                return (la!=label).all()
+                return (la!=label)#.all()
 
     def clip_image(self, image, clip_min, clip_max):
         # Clip an image, or an image batch, with upper and lower threshold.
@@ -202,7 +203,8 @@ class HSJAttack(DecisionBlackBoxAttack):
 
 
     def project(self, original_image, perturbed_images, alphas):
-        alphas_shape = [self.batch_size] + [1] * (len(original_image.shape) - 1)
+        alphas_shape = [1] * len(original_image.shape)
+        # alphas_shape = [self.batch_size] + [1] * (len(original_image.shape) - 1)
         alphas = alphas.reshape(alphas_shape)
         if self.p == '2':
                 #print(alphas.shape,original_image.shape, perturbed_images.shape)

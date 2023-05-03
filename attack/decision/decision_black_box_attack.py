@@ -33,7 +33,7 @@ from torch import Tensor as t
 import sys
 
 class DecisionBlackBoxAttack(object):
-    def __init__(self, max_queries=np.inf, epsilon=0.5, p='inf', lb=0., ub=1., batch_size=1, use_numpy=True):
+    def __init__(self, max_queries=np.inf, epsilon=0.5, p='inf', lb=0., ub=1., batch_size=1, use_numpy=True, logger=None):
         """
         :param max_queries: max number of calls to model per data point
         :param epsilon: perturbation limit according to lp-ball
@@ -57,6 +57,7 @@ class DecisionBlackBoxAttack(object):
         self.batch_size = batch_size
         self.list_loss_queries = torch.zeros(1, self.batch_size)
         self.use_numpy = use_numpy
+        self.logger = logger
 
     def result(self):
         """
@@ -103,10 +104,12 @@ class DecisionBlackBoxAttack(object):
         '''
         check whether the adversarial constrain holds for x
         '''
+        pred = self.predict_label(x)
+        # breakpoint()
         if self.targeted:
-            return self.predict_label(x) == y
+            return pred == y
         else:
-            return self.predict_label(x) != y
+            return pred != y
 
     def predict_label(self, xs):
         return self.model.predict(xs, torch.is_tensor(xs)).argmax(1)
@@ -138,8 +141,8 @@ class DecisionBlackBoxAttack(object):
         }
 
         # xs = xs / self.ub
-        if not self.use_numpy:
-            xs_t = t(xs)
+        # if not self.use_numpy:
+        xs_t = t(xs)
 
         # initialize
         # if self.targeted:
@@ -155,7 +158,7 @@ class DecisionBlackBoxAttack(object):
 
         adv, q = self._perturb(xs, ys_t)
 
-        success = self.distance(adv,xs) < self.epsilon
+        success = self.distance(adv, xs_t) < self.epsilon
         self.total_queries += np.sum(q * success)
         self.total_successes += np.sum(success)
         self.total_failures += ys_t.shape[0] - success
@@ -166,7 +169,7 @@ class DecisionBlackBoxAttack(object):
             self.list_loss_queries[-1] = q * success
         # self.total_distance += self.distance(adv,xs_t)
 
-        return self.logs
+        return self.logs, q
 '''
     
 MIT License

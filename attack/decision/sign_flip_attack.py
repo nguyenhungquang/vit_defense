@@ -33,6 +33,7 @@ import numpy as np
 import torch
 from torch import Tensor as t
 import torch.nn.functional as F
+from tqdm import tqdm
 
 from .decision_black_box_attack import DecisionBlackBoxAttack
 
@@ -41,13 +42,14 @@ class SignFlipAttack(DecisionBlackBoxAttack):
     SignFlip
     """
 
-    def __init__(self, epsilon, p, resize_factor, max_queries, lb, ub, batch_size):
+    def __init__(self, epsilon, p, resize_factor, max_queries, lb, ub, batch_size, logger):
         super().__init__(max_queries = max_queries,
                          epsilon=epsilon,
                          p=p,
                          lb=lb,
                          ub=ub,
-                         batch_size = batch_size)
+                         batch_size = batch_size,
+                         logger=logger)
         self.resize_factor = resize_factor
 
 
@@ -87,11 +89,14 @@ class SignFlipAttack(DecisionBlackBoxAttack):
             x_a = torch.rand_like(x)
             iters = 0
             check = self.is_adversarial(x_a, y)
+            pbar = tqdm(total = 10000)
             while check.sum() < y.size(0):
                 x_a[check < 1] = torch.rand_like(x_a[check < 1])
                 Q[check < 1] += 1
-                check = self.is_adversarial(x_a, y)
+                check[check < 1] = self.is_adversarial(x_a[check < 1], y[check < 1])
                 iters += 1
+                pbar.update(1)
+                pbar.set_description(str(check.sum()))
                 if iters > 10000:
                     print('Initialization Failed!')
                     return x, iters
@@ -173,6 +178,7 @@ class SignFlipAttack(DecisionBlackBoxAttack):
 
             if unsuccessful_indices.sum() == 0:
                 break
+            self.logger.print(f"Queries: {q_num} Successfully attacked images: {b - unsuccessful_indices.sum()}/{b} Avg queries: {Q[~unsuccessful_indices.bool()].mean()}")# + str(self.result()))
 
         print('attack finished!')
         print(f"Queries: {q_num}/{self.max_queries} Successfully attacked images: {b - unsuccessful_indices.sum()}/{b}")

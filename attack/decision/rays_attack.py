@@ -24,6 +24,7 @@ Implements RayS Attack
 """
 
 
+from tqdm import tqdm
 import numpy as np
 import torch
 from torch import Tensor as t
@@ -35,13 +36,13 @@ class RaySAttack(DecisionBlackBoxAttack):
     RayS
     """
 
-    def __init__(self, epsilon, p, max_queries, lb, ub, batch_size):
+    def __init__(self, epsilon, p, max_queries, lb, ub, batch_size, logger):
         super().__init__(max_queries = max_queries,
                          epsilon=epsilon,
                          p=p,
                          lb=lb,
                          ub=ub,
-                         batch_size = batch_size)
+                         batch_size = batch_size, logger=logger)
         self.lin_search_rad = 10
         self.pre_set = {1, -1}
 
@@ -81,7 +82,7 @@ class RaySAttack(DecisionBlackBoxAttack):
  
         block_level = 0
         block_ind = 0
-        for _ in range(self.max_queries):
+        for _ in tqdm(range(self.max_queries)):
             block_num = 2 ** block_level
             block_size = int(np.ceil(dim / block_num))
             start, end = block_ind * block_size, min(dim, (block_ind + 1) * block_size)
@@ -108,7 +109,7 @@ class RaySAttack(DecisionBlackBoxAttack):
                 print('out of queries')
                 break
 
-            # print('d_t: %.4f | adbd: %.4f | queries: %.4f | rob acc: %.4f | iter: %d' % (torch.mean(self.d_t), torch.mean(dist), torch.mean(self.queries.float()), len(working_ind) / len(x), i + 1))
+            self.logger.print('d_t: %.4f | adbd: %.4f | queries: %.4f | rob acc: %.4f | iter: %d' % (torch.mean(self.d_t), torch.mean(dist), torch.mean(self.queries.float()), len(working_ind) / len(x), _ + 1))
  
 
         stop_queries = torch.clamp(stop_queries, 0, self.max_queries)

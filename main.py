@@ -14,7 +14,7 @@ import json
 import yaml
 
 from argparse import Namespace
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm, trange
 import timm
 from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
@@ -62,7 +62,7 @@ np.set_printoptions(precision=5, suppress=True)
 
 
 if __name__ == '__main__':
-    attack_list = ['square_linf', 'square_l2', 'simba_dct', 'nes_l2', 'nes_linf', 'bandit_l2', 'bandit_linf', 'signhunt_l2', 'signhunt_linf', 'hsja_l2', 'nes_adapt_linf', 'nes_adapt_l2']
+    attack_list = ['square_linf', 'square_l2', 'simba_dct', 'nes_l2', 'nes_linf', 'bandit_l2', 'bandit_linf', 'signhunt_l2', 'signhunt_linf', 'hsja_l2', 'nes_adapt_linf', 'nes_adapt_l2', 'pgd', 'rays_linf', 'signflip_linf']
     parser = argparse.ArgumentParser(description='Define hyperparameters.')
     parser.add_argument('--model', type=str, default='vit_base_patch16_224', help='Model name.')
     parser.add_argument('--attack', type=str, default='square_linf', choices=attack_list, help='Attack.')
@@ -95,6 +95,9 @@ if __name__ == '__main__':
                 args.layer_index = [int(_) for _ in args.layer_index]
         print(args.layer_index)
         args.loss = 'margin_loss' if not args.targeted else 'cross_entropy'
+        blackbox = True
+        # if 'pgd' in args.attack:
+        #     blackbox = False
 
         # os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
         device = torch.device(f'cuda:{args.gpu}')
@@ -186,8 +189,11 @@ if __name__ == '__main__':
             y_test = y_test.numpy()
 
         config_pth = f'configs/{args.attack}.yaml'
-        with open(config_pth, 'r') as fr:
-            config = yaml.safe_load(fr)
+        try:
+            with open(config_pth, 'r') as fr:
+                config = yaml.safe_load(fr)
+        except:
+            config = ''
 
         # x_test = []
         # y_test = []
@@ -256,17 +262,17 @@ if __name__ == '__main__':
             #     base_model = timm.create_model(args.model, num_classes=None)
                 
             # else:
-            model = create_robust_model(args.model, args.dataset, n_cls, noise, args.defense, args.def_position, device=device, layer_index=args.layer_index)
+            model = create_robust_model(args.model, args.dataset, n_cls, noise, args.defense, args.def_position, device=device, layer_index=args.layer_index, blackbox=blackbox)
             print('done load model')
-            mean_acc = 0
-            for _ in range(5):
-                logits_clean = model.predict(x_test, not use_numpy)
-                corr_classified = (logits_clean.argmax(1) == y_test)
-                acc = corr_classified.float().mean() if torch.is_tensor(corr_classified) else corr_classified.mean()
-                mean_acc += acc
-            mean_acc /= 5
+            # mean_acc = 0
+            # for _ in range(5):
+            #     logits_clean = model.predict(x_test, not use_numpy)
+            #     corr_classified = (logits_clean.argmax(1) == y_test)
+            #     acc = corr_classified.float().mean() if torch.is_tensor(corr_classified) else corr_classified.mean()
+            #     mean_acc += acc
+            # mean_acc /= 5
             # important to check that the model was restored correctly and the clean accuracy is high
-            log.print('Clean accuracy: {:.2%}'.format(mean_acc))
+            # log.print('Clean accuracy: {:.2%}'.format(mean_acc))
             # if acc < 0.75:
             #     continue 
             # x_test = x_test[corr_classified]
@@ -304,7 +310,48 @@ if __name__ == '__main__':
                                                 args.p, metrics_path, args.targeted, args.loss, log, args.stop_criterion, adaptive=args.adaptive, M=args.num_adapt)
                 print(f'Noise :{noise}, n queries: {n_queries}')
             elif 'hsja' in args.attack:
-                attacker = HSJAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=args.n_ex, use_numpy=use_numpy, **config)
+                attacker = HSJAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=1, use_numpy=use_numpy, **config)
+                for i in (pbar := tqdm(range(x_test.shape[0]))):
+                    x = x_test[i:i+1]
+                    y = y_test[i:i+1]
+                    # breakpoint()
+                    logs = attacker.run(x, y, model, args.targeted)
+                    # print(logs)
+                    log.print(str(attacker.result()))
+                log.print(str(attacker.result()))
+            elif 'rays' in args.attack:
+                attacker = RaySAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=1, logger=log, **config)
                 attacker.run(x_test, y_test, model, args.targeted)
+                log.print(str(attacker.result()))
+                # for i in (pbar := tqdm(range(x_test.shape[0]))):
+                #     x = x_test[i:i+1]
+                #     y = y_test[i:i+1]
+                #     # breakpoint()
+                #     logs = attacker.run(x, y, model, args.targeted)
+                #     # print(logs)
+                #     log.print(str(attacker.result()))
+                # log.print(str(attacker.result()))
+            elif 'signflip' in args.attack:
+                attacker = SignFlipAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=1, logger=log, **config)
+                attacker.run(x_test, y_test, model, args.targeted)
+                log.print(str(attacker.result()))
+            elif 'pgd' in args.attack:
+                # model, mean, std = model
+                model.to(device).eval()
+                from torchattacks import PGD
+                atk = PGD(model, eps=8/255, alpha=2/225, steps=10, random_start=True)
+                atk.set_normalization_used(mean=[0] * 3, std=[1] * 3)
+                corr = 0
+                total = 0
+                # with torch.no_grad():
+                for x, y in (pbar := tqdm(loader)):
+                    adv = atk(x, y)
+                    pred = model(x.to(device)).argmax(1).cpu()
+                    corr += (pred == y).sum()
+                    total += x.shape[0]
+                    pbar.set_description(str(corr / total))
+                acc = (corr / total).item()
+                log.print(f'{noise} {acc:.4f}')
+
     except KeyboardInterrupt:
         pass
