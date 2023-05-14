@@ -39,12 +39,13 @@ class OptAttack(DecisionBlackBoxAttack):
     Opt Attack
     """
 
-    def __init__(self, epsilon, p, alpha, beta, max_queries, lb, ub):
+    def __init__(self, epsilon, p, alpha, beta, max_queries, lb, ub, logger):
         super().__init__(max_queries = max_queries,
                          epsilon=epsilon,
                          p=p,
                          lb=lb,
-                         ub=ub)
+                         ub=ub,
+                         logger=logger)
         self.alpha = alpha
         self.beta = beta
         self.iterations = 1500
@@ -165,7 +166,7 @@ class OptAttack(DecisionBlackBoxAttack):
 
         target = self.predict_label(x0 + g_theta*best_theta)
         timeend = time.time()
-        print("\nAdversarial Example Found Successfully: distortion %.4f target %d queries %d \nTime: %.4f seconds" % (dist, target, query_count + opt_count, timeend-timestart))
+        self.logger.print("\nAdversarial Example Found Successfully: distortion %.4f target %d queries %d \nTime: %.4f seconds" % (dist, target, query_count + opt_count, timeend-timestart))
         
         return t(x0 + g_theta*best_theta), query_count + opt_count
 

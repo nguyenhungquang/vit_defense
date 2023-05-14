@@ -279,7 +279,7 @@ class HSJAttack(DecisionBlackBoxAttack):
         num_evals = 0
         # Find a misclassified random noise.
         while True:
-                random_noise = np.random.uniform(self.lb, self.ub, size = input_xi.shape)
+                random_noise = np.random.uniform(self.lb, self.ub, size = input_xi.shape) * 2
                 success = self.decision_function(random_noise, label_or_target)
                 if success:
                         break

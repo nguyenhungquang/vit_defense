@@ -99,11 +99,14 @@ class BaseAttack:
         return output
 
 
-    def get_loss(self, x, y):
+    def get_loss(self, x, y, M=1):
         """
             attacker aims for high loss
         """
-        pred = self.model.predict(x, return_tensor=True)
+        if M > 1:
+            pred = self.get_adaptive_output(x, M)
+        else:
+            pred = self.model.predict(x, return_tensor=True)
         loss = - self.model.loss(y, pred, targeted=self.targeted)
         return torch.tensor(loss, device=x.device)
 

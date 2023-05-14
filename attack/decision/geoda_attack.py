@@ -85,14 +85,15 @@ class SubNoise(torch.nn.Module):
         noise = torch.randn([self.x.shape[1], 3*self.num_noises], dtype=torch.float32).cuda()
         sub_noise = torch.transpose(torch.mm(self.x, noise), 0, 1)
         r = sub_noise.view([self.num_noises, 3, self.size, self.size])
-        r_list = r.permute(0,2,3,1)
-        return r_list
+        return r
+        # r_list = r.permute(0,2,3,1)
+        # return r_list
 
 class GeoDAttack(DecisionBlackBoxAttack):
     """
     GeoDA
     """
-    def __init__(self, epsilon, p, max_queries, sub_dim, tol, alpha, mu, search_space, grad_estimator_batch_size, lb, ub, batch_size, sigma):
+    def __init__(self, epsilon, p, max_queries, sub_dim, tol, alpha, mu, search_space, grad_estimator_batch_size, lb, ub, batch_size):
         super().__init__(max_queries = max_queries,
                          epsilon=epsilon,
                          p=p,
@@ -105,7 +106,6 @@ class GeoDAttack(DecisionBlackBoxAttack):
         self.mu = mu
         self.search_space = search_space
         self.grad_estimator_batch_size = grad_estimator_batch_size
-        self.sigma = sigma
 
     def _config(self):
         return {
@@ -141,7 +141,7 @@ class GeoDAttack(DecisionBlackBoxAttack):
             pert = torch.randn(x0.shape)
 
             perturbed = x0 + num_calls*step* pert
-            perturbed = torch.clamp(perturbed, 0, 1)
+            # perturbed = torch.clamp(perturbed, 0, 1)
             num_calls += 1
             
         return perturbed, num_calls 

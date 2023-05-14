@@ -91,7 +91,8 @@ class SignFlipAttack(DecisionBlackBoxAttack):
             check = self.is_adversarial(x_a, y)
             pbar = tqdm(total = 10000)
             while check.sum() < y.size(0):
-                x_a[check < 1] = torch.rand_like(x_a[check < 1])
+                # breakpoint()
+                x_a[check < 1] = (torch.rand_like(x_a[check < 1]))
                 Q[check < 1] += 1
                 check[check < 1] = self.is_adversarial(x_a[check < 1], y[check < 1])
                 iters += 1

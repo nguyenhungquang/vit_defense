@@ -55,14 +55,14 @@ from datetime import datetime
 np.set_printoptions(precision=5, suppress=True)
 
 
-
+os.environ["CURL_CA_BUNDLE"]=""
 
 # def main(args):
 
 
 
 if __name__ == '__main__':
-    attack_list = ['square_linf', 'square_l2', 'simba_dct', 'nes_l2', 'nes_linf', 'bandit_l2', 'bandit_linf', 'signhunt_l2', 'signhunt_linf', 'hsja_l2', 'nes_adapt_linf', 'nes_adapt_l2', 'pgd', 'rays_linf', 'signflip_linf']
+    attack_list = ['square_linf', 'square_l2', 'simba_dct', 'nes_l2', 'nes_linf', 'bandit_l2', 'bandit_linf', 'signhunt_l2', 'signhunt_linf', 'hsja_l2', 'hsja_linf', 'nes_adapt_linf', 'nes_adapt_l2', 'pgd', 'rays_linf', 'signflip_linf', 'signopt_linf', 'signopt_l2', 'geoda_linf']
     parser = argparse.ArgumentParser(description='Define hyperparameters.')
     parser.add_argument('--model', type=str, default='vit_base_patch16_224', help='Model name.')
     parser.add_argument('--attack', type=str, default='square_linf', choices=attack_list, help='Attack.')
@@ -80,6 +80,7 @@ if __name__ == '__main__':
     parser.add_argument('--def_position', type=str, default='baseline')
     parser.add_argument('--layer_index', nargs='*', default=-1)
     parser.add_argument('--noise_list', nargs='*', default=None)
+    parser.add_argument('--scale_noise', action='store_true')
     parser.add_argument('--stop_criterion', type=str, default='fast_exp', choices=['single', 'without_defense', 'fast_exp', 'exp', 'none'])
     parser.add_argument('--adaptive', action='store_true')
     parser.add_argument('--num_adapt', type=int, default=1)
@@ -115,30 +116,63 @@ if __name__ == '__main__':
         # log = utils.Logger(log_path)
         # log.print('All hps: {}'.format(hps_str))
         # print('All hps: {}'.format(hps_str))
-        if 'torchvision' not in args.model:
-            cfg = timm.create_model(args.model).default_cfg
-            scale_size = int(math.floor(cfg['input_size'][-2] / cfg['crop_pct']))
-            if cfg['interpolation'] == 'bilinear':
-                interpolation = torchvision.transforms.InterpolationMode.BILINEAR 
-            elif cfg['interpolation'] == 'bicubic':
-                interpolation = torchvision.transforms.InterpolationMode.BICUBIC
+
+        if 'noise_resnet' in args.model or 'vanilla_resnet' in args.model:
+            transform = Compose([
+                ToTensor()
+            ])
         else:
-            scale_size = 224
-            interpolation=torchvision.transforms.InterpolationMode.BILINEAR
-        transform = Compose([
-            # Resize(224),
-            Resize(scale_size, interpolation=interpolation),
-            CenterCrop(size=(224, 224)),
-            ToTensor()#,
-            # Normalize(timm.data.constants.IMAGENET_DEFAULT_MEAN, timm.data.constants.IMAGENET_DEFAULT_STD)   
-        ])
+            if 'torchvision' not in args.model:
+                cfg = timm.create_model(args.model).default_cfg
+                scale_size = int(math.floor(cfg['input_size'][-2] / cfg['crop_pct']))
+                if cfg['interpolation'] == 'bilinear':
+                    interpolation = torchvision.transforms.InterpolationMode.BILINEAR 
+                elif cfg['interpolation'] == 'bicubic':
+                    interpolation = torchvision.transforms.InterpolationMode.BICUBIC
+            else:
+                scale_size = 224
+                interpolation=torchvision.transforms.InterpolationMode.BILINEAR
+            transform = Compose([
+                # Resize(224),
+                Resize(scale_size, interpolation=interpolation),
+                CenterCrop(size=(224, 224)),
+                ToTensor()#,
+                # Normalize(timm.data.constants.IMAGENET_DEFAULT_MEAN, timm.data.constants.IMAGENET_DEFAULT_STD)   
+            ])
         if 'square' in args.attack or 'hsja' in args.attack:
             use_numpy = True
         else:
             use_numpy = False
         
         # dataset_name = 'cifar10'
-        if os.path.exists(f'cache/{args.dataset}.pth'):
+        if 'noise_resnet' in args.model or 'vanilla_resnet' in args.model:
+            dataset = dset.CIFAR10('~/quang.nh/data', train=False, download=True, transform=transform)
+            def get_val_data(dataset, n_cls, n_ex):
+                assert n_ex % n_cls == 0
+                n_samples_each = n_ex // n_cls
+                loader = DataLoader(dataset, batch_size=128, num_workers=4, shuffle=False, pin_memory=True)
+                iter_loader = iter(loader)
+                img_size = dataset[0][0].shape
+                # x = torch.zeros(n_cls, n_samples_each, *img_size)
+                x = [torch.zeros(0, *img_size) for _ in range(n_cls)]
+                # y = torch.ones(n_cls, n_samples_each) * -1
+                y = [torch.zeros(0) for _ in range(n_cls)]
+                while sum([len(_) != n_samples_each for _ in y]) > 0:
+                    # print(sum([len(_) != n_samples_each for _ in y]))
+                    img, labels = next(iter_loader)
+                    for l in torch.unique(labels):
+                        # img[l, :c] 
+                        curr_n_ex = y[l].shape[0]
+                        if curr_n_ex < n_samples_each:
+                            x[l] = torch.cat([x[l], img[labels == l][:n_samples_each - curr_n_ex]])
+                            y[l] = torch.cat([y[l], labels[labels == l][:n_samples_each - curr_n_ex]])
+                        # x[l].append(img[labels == l])
+                        # y[l].append(labels[labels == l])
+                x = torch.cat(x)
+                y = torch.cat(y).to(int)
+                return x, y
+            x_test, y_test = get_val_data(dataset, n_cls, args.n_ex)
+        elif os.path.exists(f'cache/{args.dataset}.pth'):
             x_test, y_test = torch.load(f'cache/{args.dataset}.pth')
             # breakpoint()
             y_test = y_test.to(int)
@@ -151,6 +185,9 @@ if __name__ == '__main__':
                 dataset = dset.ImageFolder('data/Sample_1000', transform=transform)
                 loader = DataLoader(dataset, batch_size=args.n_ex, shuffle=False, num_workers=8)
                 x_test, y_test = next(iter(loader))
+            elif args.dataset == 'imagenet_all':
+                dataset = dset.ImageFolder('data/imagenet/val', transform=transform)
+                loader = DataLoader(dataset, batch_size=args.n_ex, shuffle=False, num_workers=8)
             else:
                 def get_val_data(dataset, n_cls, n_ex):
                     assert n_ex % n_cls == 0
@@ -239,7 +276,7 @@ if __name__ == '__main__':
             hps_str = 'model={} defense={} n_ex={} eps={} p={} n_iter={} noise_scale={}'.format(
             args.model, args.defense, args.n_ex, args.eps, args.p, args.n_iter, noise)
             method = args.def_position#'last_cls'
-            base_dir = '{}/{}/{}/{}/{}/'.format(args.model, args.exp_folder, args.attack + '_' + str(args.eps) + '_' + str(config), args.dataset, method + f'_layer_{args.layer_index}')
+            base_dir = '{}/{}/{}/{}/{}/'.format(args.model, args.exp_folder, args.attack + '_' + str(args.eps) + '_' + str(config), args.dataset, method + f'_layer_{args.layer_index}' + ('_scale_std' if args.scale_noise else ''))
             # base_dir = 'debug/'
             log_dir = base_dir + 'log/'
             os.makedirs(log_dir, exist_ok=True)
@@ -262,7 +299,7 @@ if __name__ == '__main__':
             #     base_model = timm.create_model(args.model, num_classes=None)
                 
             # else:
-            model = create_robust_model(args.model, args.dataset, n_cls, noise, args.defense, args.def_position, device=device, layer_index=args.layer_index, blackbox=blackbox)
+            model = create_robust_model(args.model, args.dataset, n_cls, noise, args.defense, args.def_position, device=device, layer_index=args.layer_index, blackbox=blackbox, scale=args.scale_noise)
             print('done load model')
             # mean_acc = 0
             # for _ in range(5):
@@ -271,8 +308,9 @@ if __name__ == '__main__':
             #     acc = corr_classified.float().mean() if torch.is_tensor(corr_classified) else corr_classified.mean()
             #     mean_acc += acc
             # mean_acc /= 5
-            # important to check that the model was restored correctly and the clean accuracy is high
+            # # important to check that the model was restored correctly and the clean accuracy is high
             # log.print('Clean accuracy: {:.2%}'.format(mean_acc))
+
             # if acc < 0.75:
             #     continue 
             # x_test = x_test[corr_classified]
@@ -289,7 +327,7 @@ if __name__ == '__main__':
                 attacker.attack(x_test, y_test, args.n_iter, args.stop_criterion)
             elif 'nes_adapt' in args.attack:
                 # lp = args.attack.split('_')[1]
-                attacker = NES_Adaptive(model, log, args.eps, **config)
+                attacker = NES_Adaptive(model, log, args.eps, M=args.num_adapt, **config)
                 # y_target = utils.random_classes_except_current(y_test, n_cls) if args.targeted else y_test
                 # y_target_onehot = utils.dense_to_onehot(y_target, n_cls=n_cls)
                 attacker.attack(x_test, y_test, args.n_iter, args.stop_criterion)
@@ -299,21 +337,29 @@ if __name__ == '__main__':
                 attacker.attack(x_test, y_test, args.n_iter, args.stop_criterion)
             elif 'signhunt' in args.attack:
                 # lp = args.attack.split('_')[1]
-                attacker = SignHunt(model, log, **config)
+                attacker = SignHunt(model, log, M=args.num_adapt, **config)
                 attacker.attack(x_test, y_test, args.n_iter, args.stop_criterion)
             elif 'square' in args.attack:
                 square_attack = square_attack_linf if args.attack == 'square_linf' else square_attack_l2
                 # y_target = utils.random_classes_except_current(y_test, n_cls) if args.targeted else y_test
                 # y_target_onehot = utils.dense_to_onehot(y_target, n_cls=n_cls)
                 # Note: we count the queries only across correctly classified images
-                n_queries, x_adv = square_attack(model, x_test, y_test, corr_classified, args.eps, args.n_iter,
+                n_queries, x_adv = square_attack(model, x_test, y_test, None, args.eps, args.n_iter,
                                                 args.p, metrics_path, args.targeted, args.loss, log, args.stop_criterion, adaptive=args.adaptive, M=args.num_adapt)
                 print(f'Noise :{noise}, n queries: {n_queries}')
             elif 'hsja' in args.attack:
+                # from foolbox.attacks import HopSkipJumpAttack
+                # attack = HopSkipJumpAttack(constraint='linf')
+                # import eagerpy as ep
+                # x_test = ep.astensors(x_test)[0]
+                # y_test = ep.astensors(y_test)[0]
+                # attack.run(model, x_test, y_test)
                 attacker = HSJAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=1, use_numpy=use_numpy, **config)
-                for i in (pbar := tqdm(range(x_test.shape[0]))):
-                    x = x_test[i:i+1]
-                    y = y_test[i:i+1]
+                bsz = 1
+                n_batch = math.ceil(x_test.shape[0] // bsz)
+                for i in (pbar := tqdm(range(n_batch))):
+                    x = x_test[i * bsz:(i+1) * bsz]
+                    y = y_test[i * bsz:(i+1) * bsz]
                     # breakpoint()
                     logs = attacker.run(x, y, model, args.targeted)
                     # print(logs)
@@ -323,33 +369,56 @@ if __name__ == '__main__':
                 attacker = RaySAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=1, logger=log, **config)
                 attacker.run(x_test, y_test, model, args.targeted)
                 log.print(str(attacker.result()))
-                # for i in (pbar := tqdm(range(x_test.shape[0]))):
-                #     x = x_test[i:i+1]
-                #     y = y_test[i:i+1]
-                #     # breakpoint()
-                #     logs = attacker.run(x, y, model, args.targeted)
-                #     # print(logs)
-                #     log.print(str(attacker.result()))
-                # log.print(str(attacker.result()))
             elif 'signflip' in args.attack:
                 attacker = SignFlipAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=1, logger=log, **config)
                 attacker.run(x_test, y_test, model, args.targeted)
+                log.print(str(attacker.result()))
+            elif 'signopt' in args.attack:
+                attacker = SignOPTAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=1, logger=log, **config)
+                attacker.run(x_test, y_test, model, args.targeted)
+                log.print(str(attacker.result()))
+                # bsz = 1
+                # n_batch = math.ceil(x_test.shape[0] // bsz)
+                # for i in (pbar := tqdm(range(n_batch))):
+                #     x = x_test[i * bsz:(i+1) * bsz]
+                #     y = y_test[i * bsz:(i+1) * bsz]
+                #     # breakpoint()
+                #     logs = attacker.run(x, y, model, args.targeted)
+                #     log.print(str(attacker.result()))
+                # log.print(str(attacker.result()))
+            elif 'geoda' in args.attack:
+                attacker = GeoDAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=1, **config)
+                bsz = 1
+                n_batch = math.ceil(x_test.shape[0] // bsz)
+                for i in (pbar := tqdm(range(n_batch))):
+                    x = x_test[i * bsz:(i+1) * bsz]
+                    y = y_test[i * bsz:(i+1) * bsz]
+                    # breakpoint()
+                    logs = attacker.run(x, y, model, args.targeted)
+                    log.print(str(attacker.result()))
                 log.print(str(attacker.result()))
             elif 'pgd' in args.attack:
                 # model, mean, std = model
                 model.to(device).eval()
                 from torchattacks import PGD
-                atk = PGD(model, eps=8/255, alpha=2/225, steps=10, random_start=True)
+                atk = PGD(model, eps=args.eps, alpha=2/225, steps=10, random_start=True)
                 atk.set_normalization_used(mean=[0] * 3, std=[1] * 3)
                 corr = 0
                 total = 0
+                n_runs = args.num_adapt
                 # with torch.no_grad():
                 for x, y in (pbar := tqdm(loader)):
-                    adv = atk(x, y)
-                    pred = model(x.to(device)).argmax(1).cpu()
+                    adv = atk(x, y).detach()
+                    # breakpoint()
+                    prob = []
+                    for _ in range(n_runs):
+                        prob.append(model(adv.to(device)).argmax(1).cpu())
+                        # prob.append(model(adv.to(device)).softmax(1).cpu())
+                    pred = torch.stack(prob)
+                    # pred = torch.stack(prob).mean(0).argmax(1)#.cpu()
                     corr += (pred == y).sum()
                     total += x.shape[0]
-                    pbar.set_description(str(corr / total))
+                    pbar.set_description(str((corr / total).item()))
                 acc = (corr / total).item()
                 log.print(f'{noise} {acc:.4f}')
 

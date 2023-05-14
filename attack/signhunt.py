@@ -6,11 +6,13 @@ import torch
 
 class SignHunt(BaseAttack):
 
-    def __init__(self, model, log, eps, lp, targeted=False):
+    def __init__(self, model, log, eps, lp, targeted=False, adaptive=False, M=1):
         super().__init__(model, log, lp, eps)
 
         self.targeted = targeted
         self.x0 = None
+        self.adaptive = adaptive
+        self.M = M
         if lp == 'l2':
             self.prior_step = step
             self.update_fn = l2_step
@@ -30,9 +32,9 @@ class SignHunt(BaseAttack):
             self.sign = torch.ones(x_shape[0], n_dim).sign()
             forward_x = self.update_fn(self.x0, self.sign.view(x_shape), self.eps)
             backward_x = self.x0
-            est_deriv = (self.get_loss(forward_x, labels) - self.get_loss(backward_x, labels)) / self.eps
+            est_deriv = (self.get_loss(forward_x, labels, self.M) - self.get_loss(backward_x, labels, self.M)) / self.eps
             self.best_est_deriv = est_deriv
-            add_queries = 3
+            add_queries = 2 * self.M
         else:
             self.best_est_deriv = self.best_est_deriv[self.idx_to_fool]
             self.x0 = self.x0[self.idx_to_fool]
@@ -44,7 +46,7 @@ class SignHunt(BaseAttack):
         self.sign[:, istart:iend] *= -1
         forward_x = self.update_fn(self.x0, self.sign.view(x_shape), self.eps)
         backward_x = self.x0
-        est_deriv = (self.get_loss(forward_x, labels) - self.get_loss(backward_x, labels)) / self.eps
+        est_deriv = (self.get_loss(forward_x, labels, self.M) - self.get_loss(backward_x, labels, self.M)) / self.eps
         assert self.best_est_deriv.shape == est_deriv.shape
         self.sign[est_deriv < self.best_est_deriv, istart:iend] *= -1
 
@@ -59,6 +61,6 @@ class SignHunt(BaseAttack):
                 self.x0 = x.clone()
                 self.h = 0
 
-        return new_x, add_queries + 1
+        return new_x, add_queries + self.M
 
         
