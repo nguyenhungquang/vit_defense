@@ -184,8 +184,8 @@ class SignOPTAttack(DecisionBlackBoxAttack):
 
             mask *= self.query_count <= self.max_queries
             dist[mask] = self.batch_distance(gg[mask] * xg[mask])
-            mask[mask.clone()] *= dist[mask] < self.epsilon
-            self.logger.print(f"Iter: {i + 1}, ASR: {mask.sum()}, distortion: {gg[gg!=float('inf')].mean():.6f}, dist: {dist[dist!=float('inf')].mean():.2f}, QC: {self.query_count.mean():3f}, ")
+            mask[mask.clone()] *= dist[mask] >= self.epsilon
+            self.logger.print(f"Iter: {i + 1}, Acc: {(dist > self.epsilon).sum()}, distortion: {gg[gg!=float('inf')].mean():.6f}, dist: {dist[dist!=float('inf')].mean():.2f}, QC: {self.query_count.mean():3f}, ")
             
             # if i % 5 == 0:
             #     print("Iteration {:3d} distortion {:.6f} num_queries {:d}".format(i+1, gg.mean(), self.query_count.mean()))
@@ -320,7 +320,10 @@ class SignOPTAttack(DecisionBlackBoxAttack):
             u /= self.get_norm(u)
             
             sign = 1
-            new_theta = theta + h.reshape(-1, *[1] * 3) * u
+            if isinstance(h, float):
+                new_theta = theta + h
+            else:
+                new_theta = theta + h.reshape(-1, *[1] * 3) * u
             # new_theta /= torch.norm(new_theta)
             new_theta /= self.get_norm(new_theta)
             

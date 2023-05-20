@@ -301,15 +301,15 @@ if __name__ == '__main__':
             # else:
             model = create_robust_model(args.model, args.dataset, n_cls, noise, args.defense, args.def_position, device=device, layer_index=args.layer_index, blackbox=blackbox, scale=args.scale_noise)
             print('done load model')
-            # mean_acc = 0
-            # for _ in range(5):
-            #     logits_clean = model.predict(x_test, not use_numpy)
-            #     corr_classified = (logits_clean.argmax(1) == y_test)
-            #     acc = corr_classified.float().mean() if torch.is_tensor(corr_classified) else corr_classified.mean()
-            #     mean_acc += acc
-            # mean_acc /= 5
-            # # important to check that the model was restored correctly and the clean accuracy is high
-            # log.print('Clean accuracy: {:.2%}'.format(mean_acc))
+            mean_acc = 0
+            for _ in range(5):
+                logits_clean = model.predict(x_test, not use_numpy)
+                corr_classified = (logits_clean.argmax(1) == y_test)
+                acc = corr_classified.float().mean() if torch.is_tensor(corr_classified) else corr_classified.mean()
+                mean_acc += acc
+            mean_acc /= 5
+            # important to check that the model was restored correctly and the clean accuracy is high
+            log.print('Clean accuracy: {:.2%}'.format(mean_acc))
 
             # if acc < 0.75:
             #     continue 
@@ -375,22 +375,23 @@ if __name__ == '__main__':
                 log.print(str(attacker.result()))
             elif 'signopt' in args.attack:
                 attacker = SignOPTAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=1, logger=log, **config)
-                attacker.run(x_test, y_test, model, args.targeted)
-                log.print(str(attacker.result()))
-                # bsz = 1
-                # n_batch = math.ceil(x_test.shape[0] // bsz)
-                # for i in (pbar := tqdm(range(n_batch))):
-                #     x = x_test[i * bsz:(i+1) * bsz]
-                #     y = y_test[i * bsz:(i+1) * bsz]
-                #     # breakpoint()
-                #     logs = attacker.run(x, y, model, args.targeted)
-                #     log.print(str(attacker.result()))
+                # attacker.run(x_test, y_test, model, args.targeted)
                 # log.print(str(attacker.result()))
+                bsz = 1
+                n_batch = math.ceil(x_test.shape[0] // bsz)
+                for i in (pbar := tqdm(range(n_batch))):
+                    x = x_test[i * bsz:(i+1) * bsz]
+                    y = y_test[i * bsz:(i+1) * bsz]
+                    # breakpoint()
+                    logs = attacker.run(x, y, model, args.targeted)
+                    log.print(str(attacker.result()))
+                log.print(str(attacker.result()))
             elif 'geoda' in args.attack:
                 attacker = GeoDAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=1, **config)
                 bsz = 1
                 n_batch = math.ceil(x_test.shape[0] // bsz)
-                for i in (pbar := tqdm(range(n_batch))):
+                # for i in (pbar := tqdm(range(0, 327))):
+                for i in (pbar := tqdm(range(0, n_batch))):
                     x = x_test[i * bsz:(i+1) * bsz]
                     y = y_test[i * bsz:(i+1) * bsz]
                     # breakpoint()

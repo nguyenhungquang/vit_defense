@@ -32,6 +32,7 @@ class ModelWrapper(nn.Module):
         self.def_position = def_position
         self.model = nn.Sequential(Normalization(mean, std), model)
         self.model.noise_sigma = model.noise_sigma
+        self.model = torch.compile(self.model)
         self.model.to(device)
         self.model.eval()
         if def_position == 'aaa_linear':

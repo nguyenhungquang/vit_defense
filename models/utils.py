@@ -15,7 +15,11 @@ class RandomDefense(nn.Module):
     def __init__(self, noise, scale=None) -> None:
         super().__init__()
         self.noise = noise
-        self.scale = nn.Parameter(torch.from_numpy(scale))
+        # self.scale = nn.Parameter(torch.from_numpy(scale))
+        if scale is not None:
+            self.scale = nn.Parameter(scale)
+        else:
+            self.scale = None
 
     def forward(self, x):
         if self.scale is not None:
@@ -32,7 +36,7 @@ def defense_token(x, defense_type, noise_sigma, scale=None):
     elif defense_type == 'random_noise':
         noise = torch.randn_like(x) * noise_sigma
         if scale is not None:
-            noise = noise * torch.from_numpy(scale).to(x)
+            noise = noise * scale.to(x)
         return x + noise 
     elif defense_type == 'laplace':
         d = torch.distributions.laplace.Laplace(torch.zeros_like(x), noise_sigma * torch.ones_like(x))
@@ -40,11 +44,13 @@ def defense_token(x, defense_type, noise_sigma, scale=None):
     elif defense_type == 'identical':
         return x
 
-def add_defense(model_name, model, defense_type, def_position, noise, layer_index=-1, scale=False):
+def add_defense(model_name, model, defense_type, def_position, noise, layer_index=-1, scale=False, dset_name=None):
     if isinstance(layer_index, int):
         layer_index = [layer_index]
     if 'resnet' in model_name:
         if def_position == 'hidden_feature':
+            if scale:
+                std = torch.load(f'stats/{model_name}_{dset_name}_last_std.pth')
             def forward_features_new(self, x):
                 x = self.conv1(x)
                 x = self.bn1(x)
@@ -67,7 +73,7 @@ def add_defense(model_name, model, defense_type, def_position, noise, layer_inde
                 
                 x = self.layer3(x)
                 if 3 in layer_index or -1 in layer_index:
-                    x = defense_token(x, defense_type, noise)
+                    x = defense_token(x, defense_type, noise, scale=std if scale else None)
                 
                 x = self.layer4(x)
                 return x
@@ -97,14 +103,16 @@ def add_defense(model_name, model, defense_type, def_position, noise, layer_inde
             model.forward_features = types.MethodType(forward_features_new, model)
     if 'vit' in model_name:
         if def_position == 'hidden_feature':
-            with open(f'stats/{model_name}_cifar10_last_std.npy', 'rb') as fw:
-                std = np.load(fw, allow_pickle=True)
-            model.blocks = nn.Sequential(*sum([[RandomDefense(noise, std if i == 11  and scale else None), b] if i in layer_index or -1 in layer_index else [b] for i, b in enumerate(model.blocks)], []))
+            # with open(f'stats/{model_name}_cifar10_last_std.npy', 'rb') as fw:
+            #     std = np.load(fw, allow_pickle=True)
+            std = torch.load(f'stats/{model_name}_cifar10_all_std.pth')
+            model.blocks = nn.Sequential(*sum([[RandomDefense(noise, std[i] if scale else None), b] if i in layer_index or -1 in layer_index else [b] for i, b in enumerate(model.blocks)], []))
     if 'deit' in model_name:
         if def_position == 'hidden_feature':
-            with open(f'stats/{model_name}_cifar10_last_std.npy', 'rb') as fw:
-                std = np.load(fw, allow_pickle=True)
-            model.blocks = nn.Sequential(*sum([[RandomDefense(noise, std if i == 11  and scale else None), b] if i in layer_index or -1 in layer_index else [b] for i, b in enumerate(model.blocks)], []))
+            # with open(f'stats/{model_name}_cifar10_last_std.npy', 'rb') as fw:
+            #     std = np.load(fw, allow_pickle=True)
+            std = torch.load(f'stats/{model_name}_cifar10_all_std.pth')
+            model.blocks = nn.Sequential(*sum([[RandomDefense(noise, std[i] if scale else None), b] if i in layer_index or -1 in layer_index else [b] for i, b in enumerate(model.blocks)], []))
     if 'mixer' in model_name or 'resmlp' in model_name:
         if def_position == 'hidden_feature':
             model.blocks = nn.Sequential(*sum([[RandomDefense(noise), b] if i in layer_index or -1 in layer_index else [b] for i, b in enumerate(model.blocks)], []))
@@ -182,7 +190,7 @@ def create_robust_model(model_name, dataset, n_cls, noise, defense, def_position
     base_model.noise_sigma = noise
     # if 'vit' not in model_name and 'torchvision' not in model_name:
     if 'torchvision' not in model_name:
-        base_model = add_defense(model_name, base_model, defense, def_position, noise, layer_index, scale=scale)
+        base_model = add_defense(model_name, base_model, defense, def_position, noise, layer_index, scale=scale, dset_name=dataset)
     # from foolbox import PyTorchModel
     # preprocessing = dict(mean=mean, std=std, axis=-3)
     # base_model.eval()
