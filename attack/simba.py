@@ -5,7 +5,7 @@ import torch
 
 class SimBA(BaseAttack):
 
-    def __init__(self, model, log, eps, img_size, freq_dims, stride, linf_bound=0, order='rand', pixel_attack=False):
+    def __init__(self, model, log, eps, img_size, freq_dims, stride, linf_bound=0.05, order='rand', pixel_attack=False):
         super().__init__(model, log, 'l2', eps)
         self.img_size = img_size
         self.freq_dims = freq_dims
@@ -49,7 +49,7 @@ class SimBA(BaseAttack):
         prev_prob = self.get_prob(img, labels)
         # pred = self.get_pred(img, stop_criterion, labels)
         if self.pixel_attack:
-            trans = lambda z: z
+            trans = lambda z: z#.clip(- self.linf_bound, self.linf_bound)
         else:
             trans = lambda z: block_idct(z, block_size=image_size, linf_bound=self.linf_bound)
 

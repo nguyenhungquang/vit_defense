@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import timm
+from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD, IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 
 from .robust_vit import VisionTransformer
 from .wrapper import ModelWrapper
@@ -26,6 +27,7 @@ class RandomDefense(nn.Module):
             out = x + self.noise * torch.randn_like(x) * self.scale#.to(x)
         else:
             out = x + self.noise * torch.randn_like(x)
+            # print(out - x)
         return out
 
 def defense_token(x, defense_type, noise_sigma, scale=None):
@@ -37,7 +39,7 @@ def defense_token(x, defense_type, noise_sigma, scale=None):
         noise = torch.randn_like(x) * noise_sigma
         if scale is not None:
             noise = noise * scale.to(x)
-        return x + noise 
+        return x + noise    
     elif defense_type == 'laplace':
         d = torch.distributions.laplace.Laplace(torch.zeros_like(x), noise_sigma * torch.ones_like(x))
         return x + d.sample()
@@ -47,7 +49,16 @@ def defense_token(x, defense_type, noise_sigma, scale=None):
 def add_defense(model_name, model, defense_type, def_position, noise, layer_index=-1, scale=False, dset_name=None):
     if isinstance(layer_index, int):
         layer_index = [layer_index]
-    if 'resnet' in model_name:
+    print(model_name)
+    if 'resnetv2' in model_name:
+        if def_position == 'hidden_feature':
+            print(layer_index, noise)
+            model.stages = nn.Sequential(*sum([[b, RandomDefense(noise, None)] 
+                                               if i in layer_index or -1 in layer_index else [b] 
+                                               for i, b in enumerate(model.stages)], []))
+            # print(model.stages)
+    elif ('resnet' in model_name or 'res50' in model_name) and 'vanilla' not in model_name:
+        # print('vanilla' not in model_name)
         if def_position == 'hidden_feature':
             if scale:
                 std = torch.load(f'stats/{model_name}_{dset_name}_last_std.pth')
@@ -79,7 +90,7 @@ def add_defense(model_name, model, defense_type, def_position, noise, layer_inde
                 return x
 
             model.forward_features = types.MethodType(forward_features_new, model)
-    if 'vgg' in model_name:
+    elif 'vgg' in model_name:
         # with open(f'stats/{model_name}_cifar10.npy', 'rb') as fw:
         #     mean = np.load(fw, allow_pickle=True)
         # mean = mean / mean.mean()
@@ -101,35 +112,36 @@ def add_defense(model_name, model, defense_type, def_position, noise, layer_inde
                     x = l(x)
                 return x
             model.forward_features = types.MethodType(forward_features_new, model)
-    if 'vit' in model_name:
+    elif 'vit' in model_name:
         if def_position == 'hidden_feature':
             # with open(f'stats/{model_name}_cifar10_last_std.npy', 'rb') as fw:
             #     std = np.load(fw, allow_pickle=True)
             std = torch.load(f'stats/{model_name}_cifar10_all_std.pth')
             model.blocks = nn.Sequential(*sum([[RandomDefense(noise, std[i] if scale else None), b] if i in layer_index or -1 in layer_index else [b] for i, b in enumerate(model.blocks)], []))
-    if 'deit' in model_name:
+    elif 'deit' in model_name:
         if def_position == 'hidden_feature':
             # with open(f'stats/{model_name}_cifar10_last_std.npy', 'rb') as fw:
             #     std = np.load(fw, allow_pickle=True)
             std = torch.load(f'stats/{model_name}_cifar10_all_std.pth')
             model.blocks = nn.Sequential(*sum([[RandomDefense(noise, std[i] if scale else None), b] if i in layer_index or -1 in layer_index else [b] for i, b in enumerate(model.blocks)], []))
-    if 'mixer' in model_name or 'resmlp' in model_name:
+    elif 'mixer' in model_name or 'resmlp' in model_name:
         if def_position == 'hidden_feature':
             model.blocks = nn.Sequential(*sum([[RandomDefense(noise), b] if i in layer_index or -1 in layer_index else [b] for i, b in enumerate(model.blocks)], []))
-    if 'poolformer' in model_name:
+    elif 'poolformer' in model_name:
         if def_position == 'hidden_feature':
             for i in range(len(model.network)):
                 if type(model.network[i]).__name__ == 'Sequential':
                     model.network[i] = nn.Sequential(*sum([[RandomDefense(noise), b] if type(b).__name__ == 'PoolFormerBlock' else [b] for b in model.network[i] ], []))
-    if 'vanilla_resnet' in model_name:
+    elif 'vanilla_resnet' in model_name:
+        # print(def_position)
         if def_position == 'hidden_feature':
             def forward_new(self, x):
                 x = self.conv_1_3x3(x)
                 x = F.relu(self.bn_1(x), inplace=True)
                 x = self.stage_1(x)
-                x = defense_token(x, defense_type, noise)
+                # x = defense_token(x, defense_type, noise)
                 x = self.stage_2(x)
-                x = defense_token(x, defense_type, noise)
+                # x = defense_token(x, defense_type, noise)
                 x = self.stage_3(x)
                 x = defense_token(x, defense_type, noise)
                 x = self.avgpool(x)
@@ -145,6 +157,12 @@ def create_robust_model(model_name, dataset, n_cls, noise, defense, def_position
     elif 'vanilla_resnet' in model_name:
         assert dataset == 'cifar10'
         base_model = vanilla_resnet20()
+    elif model_name == 'advres50_gelu':
+        base_model = timm.create_model('resnet50')
+        base_model.load_state_dict(torch.load('pretrain/advres50_gelu.pth')['model'])
+    # elif model_name == 'advdeit_small':
+
+
     elif 'vit' not in model_name and 'torchvision' not in model_name:
         base_model = timm.create_model(model_name, pretrained=False)
     elif 'vit' in model_name:
@@ -169,7 +187,7 @@ def create_robust_model(model_name, dataset, n_cls, noise, defense, def_position
             state_dict = {k[2:]:v for (k, v) in state_dict.items() if k[0] != '0'}
             # print(state_dict)
         base_model.load_state_dict(state_dict)
-    elif (dataset == 'imagenet' or dataset == 'imagenet_baseline') and 'torchvision' not in model_name:
+    elif (dataset == 'imagenet' or dataset == 'imagenet_baseline') and 'torchvision' not in model_name and 'adv' not in model_name:
         base_model.load_state_dict(timm.create_model(model_name, pretrained=True).state_dict())
             
     
@@ -184,6 +202,8 @@ def create_robust_model(model_name, dataset, n_cls, noise, defense, def_position
         base_model = torchvision.models.resnet50(pretrained=True)
         mean = [0.485, 0.456, 0.406]
         std = [0.229, 0.224, 0.225]
+    elif 'adv' in model_name:
+        mean, std = IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
     else:
         mean = base_model.default_cfg['mean']
         std = base_model.default_cfg['std']

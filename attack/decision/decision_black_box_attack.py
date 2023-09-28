@@ -110,6 +110,10 @@ class DecisionBlackBoxAttack(object):
             return pred == y
         else:
             return pred != y
+        
+    def is_adv_randomized(self, x, y):
+        test = [self.is_adversarial(x, y).float() for _ in range(9)]
+        return sum(test).item() > (len(test) / 2)
 
     def predict_label(self, xs):
         return self.model.predict(xs, torch.is_tensor(xs)).argmax(1)
@@ -158,7 +162,10 @@ class DecisionBlackBoxAttack(object):
 
         adv, q = self._perturb(xs, ys_t)
 
-        success = self.distance(adv, xs_t) < self.epsilon
+        if self.stop_criterion == 'single':
+            success = self.distance(adv, xs_t) < self.epsilon
+        else:
+            success = self.distance(adv, xs_t) < self.epsilon and self.is_adv_randomized(adv, ys_t)
         self.total_queries += np.sum(q * success)
         self.total_successes += np.sum(success)
         self.total_failures += ys_t.shape[0] - success

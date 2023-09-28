@@ -75,10 +75,11 @@ def eg_step(x, g, lr):
     """
         exponeniated gradient step
     """
+    x = (x + 1)/2
     pos = x * torch.exp(lr * g)
-    neg = (1 - x) * torch.exp(lr * g)
+    neg = (1 - x) * torch.exp(- lr * g)
     new_x = pos / (pos + neg)
-    return new_x
+    return new_x*2-1
 
 # reverses the normalization transformation
 # def invert_normalization(imgs, dataset):

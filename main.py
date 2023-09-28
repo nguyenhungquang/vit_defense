@@ -19,7 +19,7 @@ import timm
 from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 from timm.models import create_model
-from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
+from timm.data.constants import IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 from timm.data.transforms_factory import transforms_imagenet_eval
 from torchvision import datasets as dset
 from torchvision.transforms import Compose, ToTensor, Normalize, Resize, CenterCrop
@@ -31,6 +31,7 @@ from attack.bandit import *
 from attack.nes import NES
 from attack.nes_adapt import NES_Adaptive
 from attack.signhunt import SignHunt
+from attack.zo_signsgd import ZO_SignSGD
 from attack.decision import *
 from models.robust_vit import VisionTransformer
 from models.utils import create_robust_model
@@ -62,10 +63,10 @@ os.environ["CURL_CA_BUNDLE"]=""
 
 
 if __name__ == '__main__':
-    attack_list = ['square_linf', 'square_l2', 'simba_dct', 'nes_l2', 'nes_linf', 'bandit_l2', 'bandit_linf', 'signhunt_l2', 'signhunt_linf', 'hsja_l2', 'hsja_linf', 'nes_adapt_linf', 'nes_adapt_l2', 'pgd', 'rays_linf', 'signflip_linf', 'signopt_linf', 'signopt_l2', 'geoda_linf']
+    attack_list = ['square_linf', 'square_l2', 'simba_dct', 'simba_pixel', 'nes_l2', 'nes_linf', 'bandit_l2', 'bandit_linf', 'signhunt_l2', 'signhunt_linf', 'hsja_l2', 'hsja_linf', 'nes_adapt_linf', 'nes_adapt_l2', 'pgd', 'autoattack', 'fgsm', 'rays_linf', 'signflip_linf', 'signopt_linf', 'signopt_l2', 'geoda_linf', 'zo_signsgd_linf']
     parser = argparse.ArgumentParser(description='Define hyperparameters.')
     parser.add_argument('--model', type=str, default='vit_base_patch16_224', help='Model name.')
-    parser.add_argument('--attack', type=str, default='square_linf', choices=attack_list, help='Attack.')
+    parser.add_argument('--attack', type=str, default='square_linf')#, choices=attack_list, help='Attack.')
     parser.add_argument('--exp_folder', type=str, default='exps_balance_mean', help='Experiment folder to store all output.')
     parser.add_argument('--gpu', type=str, default='3', help='GPU number. Multiple GPUs are possible for PT models.')
     parser.add_argument('--n_ex', type=int, default=10000, help='Number of test ex to test on.')
@@ -84,6 +85,7 @@ if __name__ == '__main__':
     parser.add_argument('--stop_criterion', type=str, default='fast_exp', choices=['single', 'without_defense', 'fast_exp', 'exp', 'none'])
     parser.add_argument('--adaptive', action='store_true')
     parser.add_argument('--num_adapt', type=int, default=1)
+    parser.add_argument('--wb', action='store_true')
     # args = parser.parse_args(
     #     '--attack=square_linf --model=pt_vit_base_patch16_224_cifar10_finetuned --n_ex=1000 --eps=12.75 --p=0.05 --n_iter=10000'.split(' '))
     args = parser.parse_args()
@@ -121,6 +123,20 @@ if __name__ == '__main__':
             transform = Compose([
                 ToTensor()
             ])
+        elif 'adv' in args.model:
+            transform = []
+            size = int((256 / 224) * 224)
+            mean_, std_ = IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
+            transform.append(
+    #             transforms.Resize(size, interpolation=3),  # to maintain same ratio w.r.t. 224 images
+                Resize(size),
+    #             transforms.Scale(256),
+            )
+            transform.append(CenterCrop(224))
+                                        
+            transform.append(ToTensor())
+            # transform.append(torchvision.transforms.Normalize(mean_, std_))
+            transform = Compose(transform)
         else:
             if 'torchvision' not in args.model:
                 cfg = timm.create_model(args.model).default_cfg
@@ -135,7 +151,7 @@ if __name__ == '__main__':
             transform = Compose([
                 # Resize(224),
                 Resize(scale_size, interpolation=interpolation),
-                CenterCrop(size=(224, 224)),
+                CenterCrop(size=(cfg['input_size'][-2], cfg['input_size'][-2])),
                 ToTensor()#,
                 # Normalize(timm.data.constants.IMAGENET_DEFAULT_MEAN, timm.data.constants.IMAGENET_DEFAULT_STD)   
             ])
@@ -145,6 +161,12 @@ if __name__ == '__main__':
             use_numpy = False
         
         # dataset_name = 'cifar10'
+        if args.attack == 'pgd' or args.attack == 'autoattack' or args.attack == 'fgsm' or args.wb:
+            if args.dataset == 'cifar10':
+                dataset = dset.CIFAR10('~/quang.nh/data', train=False, download=True, transform=transform)  
+            elif args.dataset == 'imagenet':
+                dataset = dset.ImageFolder('data/imagenet/val', transform=transform)
+            loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=8, pin_memory=True)
         if 'noise_resnet' in args.model or 'vanilla_resnet' in args.model:
             dataset = dset.CIFAR10('~/quang.nh/data', train=False, download=True, transform=transform)
             def get_val_data(dataset, n_cls, n_ex):
@@ -176,6 +198,7 @@ if __name__ == '__main__':
             x_test, y_test = torch.load(f'cache/{args.dataset}.pth')
             # breakpoint()
             y_test = y_test.to(int)
+            
         else:
             if args.dataset == 'cifar10':
                 dataset = dset.CIFAR10('~/quang.nh/data', train=False, download=True, transform=transform)  
@@ -268,8 +291,11 @@ if __name__ == '__main__':
             noise_list = [0.075, 0.05, 0.01, 0.005]
         elif args.def_position == 'post_att_cls':
             noise_list = [0.3, 0.2, 0.15, 0.1, 0.075, 0.05, 0.01, 0.005]
+        else:
+            noise_list = [0]
         if args.noise_list is not None:
             noise_list = [float(_) for _ in args.noise_list]
+        
         for noise in noise_list:
         # for noise in noise_list:
             print('Start running for noise scale', noise)
@@ -319,6 +345,10 @@ if __name__ == '__main__':
                 attacker = SimBA(model, log, args.eps, 224, **config)
                 # _, prob, succ, queries, l2, linf = attacker.attack(x_test[corr_classified], y_test[corr_classified], args.n_iter)
                 _, prob, succ, queries, l2, linf = attacker.attack(x_test, y_test, args.n_iter, args.stop_criterion)
+            elif args.attack == 'simba_pixel':
+                attacker = SimBA(model, log, args.eps, 224, **config)
+                # _, prob, succ, queries, l2, linf = attacker.attack(x_test[corr_classified], y_test[corr_classified], args.n_iter)
+                _, prob, succ, queries, l2, linf = attacker.attack(x_test, y_test, args.n_iter, args.stop_criterion)
             elif 'nes' in args.attack and not 'adapt' in args.attack:
                 # lp = args.attack.split('_')[1]
                 attacker = NES(model, log, args.eps, **config)
@@ -337,7 +367,11 @@ if __name__ == '__main__':
                 attacker.attack(x_test, y_test, args.n_iter, args.stop_criterion)
             elif 'signhunt' in args.attack:
                 # lp = args.attack.split('_')[1]
-                attacker = SignHunt(model, log, M=args.num_adapt, **config)
+                attacker = SignHunt(model, log, eps=args.eps, M=args.num_adapt, **config)
+                attacker.attack(x_test, y_test, args.n_iter, args.stop_criterion)
+            elif 'zo_signsgd' in args.attack:
+                # breakpoint()
+                attacker = ZO_SignSGD(model, log, args.eps, **config)
                 attacker.attack(x_test, y_test, args.n_iter, args.stop_criterion)
             elif 'square' in args.attack:
                 square_attack = square_attack_linf if args.attack == 'square_linf' else square_attack_l2
@@ -387,7 +421,7 @@ if __name__ == '__main__':
                     log.print(str(attacker.result()))
                 log.print(str(attacker.result()))
             elif 'geoda' in args.attack:
-                attacker = GeoDAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=1, **config)
+                attacker = GeoDAttack(epsilon=args.eps, max_queries=args.n_iter, lb=0, ub=1, batch_size=1, stop_criterion=args.stop_criterion, **config)
                 bsz = 1
                 n_batch = math.ceil(x_test.shape[0] // bsz)
                 # for i in (pbar := tqdm(range(0, 327))):
@@ -396,32 +430,51 @@ if __name__ == '__main__':
                     y = y_test[i * bsz:(i+1) * bsz]
                     # breakpoint()
                     logs = attacker.run(x, y, model, args.targeted)
+                    print(logs[1])
                     log.print(str(attacker.result()))
                 log.print(str(attacker.result()))
-            elif 'pgd' in args.attack:
+            elif 'pgd' in args.attack or 'autoattack' in args.attack or 'fgsm' in args.attack or args.wb:
                 # model, mean, std = model
                 model.to(device).eval()
-                from torchattacks import PGD
-                atk = PGD(model, eps=args.eps, alpha=2/225, steps=10, random_start=True)
+                noise = model.model.noise_sigma
+                model.model.noise_sigma = 0
+                from torchattacks import PGD, AutoAttack, FGSM, DeepFool, FFGSM, CW
+                if 'pgd' in args.attack:
+                    atk = PGD(model, eps=args.eps, alpha=2/225, steps=10, random_start=True)
+                elif 'autoattack' in args.attack:
+                    atk = AutoAttack(model, eps=args.eps, n_classes=n_cls)
+                elif 'fgsm' in args.attack:
+                    atk = FGSM(model, eps=args.eps)
+                elif 'ffgsm' in args.attack:
+                    atk = FFGSM(model, eps=args.eps)
+                elif 'deepfool' in args.attack:
+                    atk = DeepFool(model)
+                elif 'cw' in args.attack:
+                    atk = CW(model)
                 atk.set_normalization_used(mean=[0] * 3, std=[1] * 3)
                 corr = 0
                 total = 0
-                n_runs = args.num_adapt
+                n_runs = 1#args.num_adapt
                 # with torch.no_grad():
                 for x, y in (pbar := tqdm(loader)):
+                    model.model.noise_sigma = 0
                     adv = atk(x, y).detach()
+                    model.model.noise_sigma = noise
                     # breakpoint()
                     prob = []
                     for _ in range(n_runs):
                         prob.append(model(adv.to(device)).argmax(1).cpu())
-                        # prob.append(model(adv.to(device)).softmax(1).cpu())
+                        # prob.append(model(adv.to(device)).softmax(1).detach())
                     pred = torch.stack(prob)
-                    # pred = torch.stack(prob).mean(0).argmax(1)#.cpu()
-                    corr += (pred == y).sum()
+                    # breakpoint()
+                    # pred = torch.stack(prob).mean(0).argmax(1).cpu()
+                    # breakpoint()
+                    corr += ((pred == y).sum(dim=0) > (n_runs // 2)).sum() #/ n_runs
                     total += x.shape[0]
                     pbar.set_description(str((corr / total).item()))
                 acc = (corr / total).item()
                 log.print(f'{noise} {acc:.4f}')
+                
 
     except KeyboardInterrupt:
         pass

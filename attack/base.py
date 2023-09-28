@@ -20,7 +20,7 @@ class BaseAttack:
             x_batch = x[i*bsz:(i+1)*bsz]
             y_batch = y[i*bsz:(i+1)*bsz]
             logits = self.model(x_batch)
-            prob = logits.softmax(dim=1)
+            prob = logits.softmax(dim=1).cpu()
             # out = self.model(x).softmax(dim=-1)
             prob = torch.gather(prob, 1, y_batch.unsqueeze(1)).squeeze(1)
             probs.append(prob)

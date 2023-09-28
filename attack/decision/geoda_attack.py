@@ -93,7 +93,7 @@ class GeoDAttack(DecisionBlackBoxAttack):
     """
     GeoDA
     """
-    def __init__(self, epsilon, p, max_queries, sub_dim, tol, alpha, mu, search_space, grad_estimator_batch_size, lb, ub, batch_size):
+    def __init__(self, epsilon, p, max_queries, sub_dim, tol, alpha, mu, search_space, grad_estimator_batch_size, lb, ub, batch_size, stop_criterion='single'):
         super().__init__(max_queries = max_queries,
                          epsilon=epsilon,
                          p=p,
@@ -106,6 +106,7 @@ class GeoDAttack(DecisionBlackBoxAttack):
         self.mu = mu
         self.search_space = search_space
         self.grad_estimator_batch_size = grad_estimator_batch_size
+        self.stop_criterion = stop_criterion
 
     def _config(self):
         return {
@@ -265,8 +266,15 @@ class GeoDAttack(DecisionBlackBoxAttack):
             norm = self.distance(x_adv, x_0)
             message = ' (took {:.5f} seconds)'.format(t2 - t1)
             print('iteration -> ' + str(i) + str(message) + '     -- ' + self.p + ' norm is -> ' + str(norm))
+            # breakpoint()
             if norm < self.epsilon:
-                break
+                if self.stop_criterion == 'single':
+                    break
+                else:
+                    test = [self.is_adversarial(x_adv, y_0).float() for _ in range(9)]
+                    print(sum(test))
+                    if sum(test).item() > (len(test) / 2):
+                        break
             if q_num > self.max_queries:
                 break
             

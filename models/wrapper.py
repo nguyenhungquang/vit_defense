@@ -1,9 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import albumentations as A
 import numpy as np
 import utils
 import math
+import cv2
+from torchvision.transforms import ToPILImage, ToTensor
 
 class Normalization(nn.Module):
     def __init__(self, mean, std):
@@ -14,6 +17,22 @@ class Normalization(nn.Module):
     def forward(self, x):
         x = (x - self.mean) / self.std
         return x
+    
+def tojpeg(img, format='JPEG', quality=75):
+    if not torch.is_tensor(img):
+        img = torch.from_numpy(img)
+    img = ToPILImage()(img)
+    img = np.asarray(img)
+    format = '.' +format.lower()
+    if format in [".jpeg", ".jpg"]:
+        quality_flag = cv2.IMWRITE_JPEG_QUALITY
+    elif format == ".webp":
+        quality_flag = cv2.IMWRITE_WEBP_QUALITY
+
+    _, encoded_img = cv2.imencode(format, img, (int(quality_flag), quality))
+
+    img = cv2.imdecode(encoded_img, cv2.IMREAD_UNCHANGED)
+    return img
 
 class ModelWrapper(nn.Module):
     def __init__(self, model, num_classes=10, def_position=None, device='cpu', mean=None, std=None):
@@ -32,7 +51,7 @@ class ModelWrapper(nn.Module):
         self.def_position = def_position
         self.model = nn.Sequential(Normalization(mean, std), model)
         self.model.noise_sigma = model.noise_sigma
-        self.model = torch.compile(self.model)
+        # self.model = torch.compile(self.model)
         self.model.to(device)
         self.model.eval()
         if def_position == 'aaa_linear':
@@ -97,6 +116,8 @@ class ModelWrapper(nn.Module):
     def forward(self, x):
         # if self.def_position == 'input_noise':
         #     x = x + np.random.normal(scale=self.model.noise_sigma, size=x.shape).astype(np.float32)
+        if self.def_position == 'jpeg':
+            x = torch.from_numpy(np.stack([tojpeg(_) for _ in x])).permute(0, 3, 1, 2) / 255.
         x = x.to(self.device)
         if self.def_position == 'input_noise':
             x = x + self.model.noise_sigma * torch.randn_like(x)
@@ -133,6 +154,8 @@ class ModelWrapper(nn.Module):
         with torch.no_grad():  # otherwise consumes too much memory and leads to a slowdown
             for i in range(n_batches):
                 x_batch = x[i*self.batch_size:(i+1)*self.batch_size]
+                if self.def_position == 'jpeg':
+                    x_batch = torch.from_numpy(np.stack([tojpeg(_) for _ in x_batch])).permute(0, 3, 1, 2) / 255.
                 x_batch_torch = torch.as_tensor(x_batch).to(self.device)
                 if self.def_position == 'input_noise' and defense:
                     x_batch_torch = x_batch_torch + self.model.noise_sigma * torch.randn_like(x_batch_torch) 
